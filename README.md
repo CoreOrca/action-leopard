@@ -1,36 +1,75 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Action Leopard
 
-## Getting Started
+Spatial control for generated action. Translate real locations into malleable scenes on a canvas, direct with precision, and generate video that obeys — built for professional filmmakers and serious AI-video creators working inside the constraints of scenes and locations that already exist.
 
-First, run the development server:
+## The core idea
+
+Video models revert objects, vehicles, people, and architecture to "most likely" trajectories because text prompts (even with a start frame) are lossy. Action Leopard adds a layer of **spatial determinism**:
+
+1. **Reference → scene**: grok-4.5 (vision) translates your location image into movable blocking objects on a tldraw canvas.
+2. **Canvas → control frames**: canvas screenshots + art direction images go to Nano Banana Pro to stage **frame A**, then a "same camera, N seconds later" edit produces **frame B** — the end frame implicitly encodes a displacement vector for every object.
+3. **Frames → video**: Kling 3 Pro interpolates A→B (start/end frame); Grok Imagine 1.5 animates a single frame with a screen-space-directed motion prompt. Chain 5-second beats for long sequences — storyboarding, mechanized.
+
+The prompt writer (grok-4.5) is trained by system prompt to describe **the delta between two stills** and to direct in **screen space** ("enters frame bottom-right", "the ocean stays on the right edge for the entire shot") — language video models actually obey.
+
+## Stack
+
+- Next.js (App Router) on Vercel · Supabase (Postgres + Auth) · Vercel Blob (all media, app-owned URLs)
+- LLM: **grok-4.5** via the xAI API directly (prompt writer + production agent + scene translation)
+- Image: **Nano Banana Pro** (`fal-ai/gemini-3-pro-image-preview/edit`)
+- Video: **Grok Imagine 1.5** i2v 480/720/1080p (`xai/grok-imagine-video/v1.5/image-to-video`), **Kling 3 Pro** start+end frames (`fal-ai/kling-video/v3/pro/image-to-video`), Kling 3 Pro motion control (guide video)
+- Canvas: tldraw SDK · State: zustand
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
+cp .env.example .env.local   # fill in values (see below)
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Environment
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+All keys live in `.env.local` (gitignored). Required:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable | Where to get it |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase dashboard → Project Settings → API |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Same page — the `sb_publishable_...` key |
+| `SUPABASE_SECRET_KEY` | Same page — `sb_secret_...` (server only) |
+| `XAI_API_KEY` | console.x.ai |
+| `FAL_KEY` | fal.ai dashboard → Keys |
+| `BLOB_READ_WRITE_TOKEN` | Vercel dashboard → Storage → `action-leopard-blob` → “Connect / .env.local” |
 
-## Learn More
+The legacy `SUPABASE_ANON_KEY` / `SERVICE_ROLE_KEY` / `JWT_SECRET` fields are **not needed** — this app uses the new publishable/secret API keys.
 
-To learn more about Next.js, take a look at the following resources:
+### Supabase auth configuration (one-time, in the dashboard)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. **Authentication → URL Configuration**: set Site URL to `http://localhost:3001` (add your production URL after deploy) and add `http://localhost:3001/**` to Redirect URLs.
+2. **Authentication → Email Templates → Confirm signup**: change the link to
+   `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`
+   (required for the server-side confirm flow in `src/app/auth/confirm/route.ts`).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Database
 
-## Deploy on Vercel
+Migrations live in `supabase/migrations/`. They have already been applied to the linked project; to re-apply elsewhere use the Supabase SQL editor or `supabase db push`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Workspace tour
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Top bar**: hamburger + project name · image/video model selectors (switchable per generation) · theme toggle · account menu.
+- **Left panel**: intent, location reference image, art direction (text + images — law for the prompt writer), elements (characters/props/vehicles with images and notes).
+- **Canvas**: “✦ Scene from image” builds the movable blocking scene from your reference. Sketch freely, move objects, then “Save shot” to capture a blocking sketch as an input image. “Annotate” (from the preview panel) places any image as a locked background to draw motion paths on.
+- **Preview**: asset viewer + image palette. Mark any image as **Start frame (A)** / **End frame (B)** for video generation.
+- **Prompt bar**: ✦ Frame A / ✦ Frame B / ✦ Video prompt buttons call grok-4.5; the result is editable and autosaves. Generate image / Generate video use the models selected in the top bar.
+- **Sequence strip**: generated clips in order — drag to reorder, click to play in a modal, download.
+- **⟡ Agent**: conversational production agent (grok-4.5 with tools) that can translate scenes onto your canvas, write prompts, and generate — while you watch each step.
+
+## Roadmap (pipeline is built to be aware of these)
+
+- **Shot framing / 360° camera**: scene objects retain normalized spatial coords (`SceneObject`), ready to be lifted into an explorable 3-D blocking view for framing shots from any angle, plus drawn camera trajectories.
+- **Canvas animation → guide video**: record object motion on the canvas as a video input for Kling motion-control / video-input models.
+- Side-by-side canvas / framed-shot preview; Google OAuth; payments.
+
+## Credits caution
+
+fal credits are limited. The app never generates without an explicit click or an explicit agent instruction, and the agent confirms before generating more than two assets in one step.
