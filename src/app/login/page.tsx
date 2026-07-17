@@ -31,15 +31,30 @@ function LoginForm() {
         router.refresh();
       }
     } else {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           emailRedirectTo: `${window.location.origin}/auth/confirm`,
         },
       });
-      if (error) setStatus(error.message);
-      else setStatus("Check your email for a confirmation link.");
+      if (error) {
+        setStatus(error.message);
+      } else if (data.session) {
+        router.push("/studio");
+        router.refresh();
+      } else {
+        // No session — email confirmation is still enabled in Supabase.
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (signInError) setStatus(signInError.message);
+        else {
+          router.push("/studio");
+          router.refresh();
+        }
+      }
     }
     setBusy(false);
   }
