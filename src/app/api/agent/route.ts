@@ -64,6 +64,8 @@ const TOOLS: ToolDef[] = [
               "grok-imagine-1.5-1080p",
               "kling-3-pro",
               "kling-3-pro-motion",
+              "seedance-2",
+              "seedance-2-fast",
             ],
           },
           start_image_url: { type: "string" },

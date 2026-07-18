@@ -17,7 +17,7 @@ The prompt writer (grok-4.5) is trained by system prompt to describe **the delta
 - Next.js (App Router) on Vercel · Supabase (Postgres + Auth) · Vercel Blob (all media, app-owned URLs)
 - LLM: **grok-4.5** via the xAI API directly (prompt writer + production agent + scene translation)
 - Image: **Nano Banana Pro** (`fal-ai/gemini-3-pro-image-preview/edit`)
-- Video: **Grok Imagine 1.5** i2v 480/720/1080p (`xai/grok-imagine-video/v1.5/image-to-video`), **Kling 3 Pro** start+end frames (`fal-ai/kling-video/v3/pro/image-to-video`), Kling 3 Pro motion control (guide video)
+- Video: **Grok Imagine 1.5** i2v 480/720/1080p, **Kling 3 Pro** start+end frames, Kling 3 Pro motion control (guide video), **Seedance 2.0** start+end frames (`bytedance/seedance-2.0/image-to-video`), **Seedance 2.0 Fast** multi-reference + video input (`bytedance/seedance-2.0/fast/reference-to-video`)
 - Canvas: tldraw SDK · State: zustand
 
 ## Setup

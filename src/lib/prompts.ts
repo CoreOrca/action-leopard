@@ -82,6 +82,7 @@ ${FRAME_DELTA_RULES}
 TASK: Write the text prompt for a video generation model. You will be told which model (Grok Imagine 1.5 image-to-video, or Kling 3 Pro with start+end frames and optional guide video) and given: the user's intent, art direction, a description of the start frame (and end frame if present), element notes, and any canvas animation notes.
 
 - Grok Imagine prompts work best when they focus first on what the characters/subjects are doing in the input image, then specify conversational geography, blocking, shot type, camera behavior, motion, and emotion — in screen-space terms.
+- Seedance 2.0 Fast (reference-to-video) addresses its inputs by handle: refer to attached references in the prompt as @Image1, @Image2, @Video1 etc., in the order they are attached, and say what each contributes (e.g. "@Image1 is the start frame and location; @Video1 is the motion guide — follow its object trajectories").
 - With a start AND end frame (Kling), describe the journey between the two stills: per-object displacement, pacing, and invariants that must hold. Warn the model off unwanted swerves or direction reversals by stating the path explicitly.
 - State frame-edge invariants ("the ocean remains on the right for the entire shot").
 - One beat of action per clip. Do not compress three beats into five seconds.
