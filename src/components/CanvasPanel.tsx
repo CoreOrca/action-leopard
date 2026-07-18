@@ -310,18 +310,9 @@ export default function CanvasPanel({
     if (cinematic && targets.length) {
       setBusy("Painting scene atlas…");
       try {
-        // Include grok boxes so color-key extraction can clip bleed
         const legend = assignAtlasColors(targets);
         const atlas = await requestWorld("atlas", referenceUrl, {
-          objects: legend.map(({ r, g, b, id, label, kind, mobile }) => ({
-            id,
-            label,
-            kind,
-            mobile,
-            r,
-            g,
-            b,
-          })),
+          objects: legend,
         });
         if (atlas.url) {
           setBusy("Cutting stickers from atlas…");
@@ -365,15 +356,7 @@ export default function CanvasPanel({
         if (!maskUrl) continue;
         setBusy(`Cutting pieces… ${done}/${needSam.length}`);
         try {
-          const tightSubject =
-            obj.mobile ||
-            obj.kind === "vehicle" ||
-            obj.kind === "character" ||
-            obj.kind === "prop";
-          const cut = await cutoutFromMask(referenceUrl, maskUrl, {
-            clipBox: { x: obj.x, y: obj.y, w: obj.w, h: obj.h },
-            tightSubject,
-          });
+          const cut = await cutoutFromMask(referenceUrl, maskUrl);
           if (!cut) continue;
           const url = await uploadBlobOnly(
             cut.blob,
