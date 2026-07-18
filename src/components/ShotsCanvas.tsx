@@ -24,11 +24,9 @@ const STATUS_LABEL: Partial<Record<Shot["status"], string>> = {
 
 export default function ShotsCanvas({
   projectId,
-  onImagesFromScript,
   onMakeVideo,
 }: {
   projectId: string;
-  onImagesFromScript?: () => void;
   onMakeVideo?: () => void;
 }) {
   const { assets, addAssets, setBusy, busy } = useWorkspace();
@@ -215,14 +213,6 @@ export default function ShotsCanvas({
         >
           + Add shot
         </button>
-        <button
-          onClick={onImagesFromScript}
-          disabled={!onImagesFromScript || !!busy}
-          className="whitespace-nowrap border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background disabled:opacity-40"
-          title="Have the agent plan shots from your script and generate start frames"
-        >
-          ✦ Images from script
-        </button>
         <span className="mx-1 h-4 w-px bg-border-soft" />
         <button
           onClick={() => zoomStep(-1)}
@@ -257,9 +247,9 @@ export default function ShotsCanvas({
         {shots.length === 0 && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <p className="max-w-sm text-center font-mono text-[11px] leading-relaxed text-muted">
-              No shots yet. Add your script and location images in the left
-              rail, then press ✦ IMAGES FROM SCRIPT — or + ADD SHOT to lay out
-              frames by hand.
+              No shots yet. Open the ⟡ ACTION SCENE MAKER (Agent button, left
+              rail), give it your script and intent, and press ✦ PLAN SCENE —
+              or + ADD SHOT to lay out frames by hand.
             </p>
           </div>
         )}

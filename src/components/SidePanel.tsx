@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useWorkspace } from "@/lib/store";
 import { useSceneAgent } from "@/lib/scene-store";
+import { planScene } from "@/lib/scene-agent";
 import { saveBlobAsAsset } from "@/lib/canvas";
 import type { Element, ElementKind, LocationMapEntry } from "@/lib/types";
 
@@ -215,6 +216,13 @@ export default function SidePanel({
             rows={8}
             className="w-full border border-border-soft bg-transparent p-2 text-xs outline-none focus:border-border"
           />
+          <button
+            onClick={() => planScene()}
+            className="mt-1 w-full border border-foreground px-2 py-2 font-mono text-[10px] uppercase tracking-widest hover:bg-foreground hover:text-background"
+            title="Have the agent parse the script into shots across your location map"
+          >
+            ✦ Plan scene
+          </button>
         </div>
       )}
 

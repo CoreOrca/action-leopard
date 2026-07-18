@@ -64,8 +64,12 @@ export default function Workspace({ projectId }: { projectId: string }) {
       setAssets((a.data as Asset[]) ?? []);
       const shots = (s.data as Shot[]) ?? [];
       useSceneAgent.getState().setShots(shots);
-      if ((p.data as Project)?.project_type === "scene")
+      if ((p.data as Project)?.project_type === "scene") {
         useSceneAgent.getState().setPhase(computeResume(shots).phase);
+        // Fresh scene: open the Action scene maker so its intake walks the
+        // user through script/intent/locations.
+        if (!shots.length) useSceneAgent.getState().setPanelOpen(true);
+      }
       setLoaded(true);
     });
     return () => {
@@ -156,6 +160,8 @@ export default function Workspace({ projectId }: { projectId: string }) {
           onResume={() => runScene()}
           onRetryShot={(id) => retryShot(id)}
           onAcceptShot={(id) => acceptShot(id)}
+          onPlanScene={() => planScene()}
+          onPatchProject={patchProject}
         />
       )}
     </main>
@@ -200,11 +206,7 @@ function SceneShotsPane({ projectId }: { projectId: string }) {
   const view = useSceneAgent((s) => s.view);
   return (
     <div className={view === "shots" ? "flex min-h-0 min-w-0 flex-1" : "hidden"}>
-      <ShotsCanvas
-        projectId={projectId}
-        onImagesFromScript={() => planScene()}
-        onMakeVideo={() => makeVideos()}
-      />
+      <ShotsCanvas projectId={projectId} onMakeVideo={() => makeVideos()} />
     </div>
   );
 }

@@ -30,14 +30,18 @@ export default function SceneAgentPanel({
   onResume,
   onRetryShot,
   onAcceptShot,
+  onPlanScene,
+  onPatchProject,
 }: {
   onGenerate?: (dryRun?: boolean) => void;
   onResume?: () => void;
   onRetryShot?: (shotId: string) => void;
   onAcceptShot?: (shotId: string) => void;
+  onPlanScene?: () => void;
+  onPatchProject?: (patch: Record<string, unknown>) => void;
 }) {
   const [dryRun, setDryRun] = useState(false);
-  const { project } = useWorkspace();
+  const { project, patchProject } = useWorkspace();
   const {
     panelOpen,
     setPanelOpen,
@@ -94,6 +98,72 @@ export default function SceneAgentPanel({
 
       {/* Body */}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-3">
+        {/* Intake: script + intent + plan trigger */}
+        {planned.length === 0 && (phase === "idle" || phase === "done") && (
+          <div className="mb-3 border border-border-soft">
+            <div className="border-b border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-muted">
+              Set up the scene
+            </div>
+            <div className="flex flex-col gap-2 p-2">
+              <p className="font-mono text-[10px] leading-relaxed text-muted">
+                1 — Give me your intent and script below. 2 — Add your art
+                direction, location images (the path the action travels, in
+                order), and elements in the LEFT SIDE BAR. 3 — Press ✦ PLAN
+                SCENE and I&apos;ll break the script into shots.
+              </p>
+              <div>
+                <label className="mb-1 block font-mono text-[9px] uppercase tracking-widest text-muted">
+                  Intent
+                </label>
+                <textarea
+                  value={project?.intent ?? ""}
+                  onChange={(e) => {
+                    patchProject({ intent: e.target.value });
+                    onPatchProject?.({ intent: e.target.value });
+                  }}
+                  placeholder="What happens in this sequence? Who, where, what motion…"
+                  rows={2}
+                  className="w-full border border-border-soft bg-transparent p-2 text-xs outline-none focus:border-border"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block font-mono text-[9px] uppercase tracking-widest text-muted">
+                  Script
+                </label>
+                <textarea
+                  value={project?.script ?? ""}
+                  onChange={(e) => {
+                    patchProject({ script: e.target.value });
+                    onPatchProject?.({ script: e.target.value });
+                  }}
+                  placeholder="Paste the action sequence — I'll parse it into shots…"
+                  rows={6}
+                  className="w-full border border-border-soft bg-transparent p-2 text-xs outline-none focus:border-border"
+                />
+              </div>
+              <button
+                onClick={onPlanScene}
+                disabled={!onPlanScene || !project?.script?.trim() || !project?.location_map?.length}
+                title={
+                  !project?.script?.trim()
+                    ? "Add a script first"
+                    : !project?.location_map?.length
+                      ? "Add at least one location image in the left side bar"
+                      : "Break the script into shots across your location map"
+                }
+                className="w-full border border-foreground px-3 py-2 font-mono text-[11px] uppercase tracking-widest hover:bg-foreground hover:text-background disabled:opacity-40"
+              >
+                ✦ Plan scene
+              </button>
+              {!project?.location_map?.length && (
+                <p className="text-center font-mono text-[9px] text-danger">
+                  No location images yet — add them in the left side bar.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Plan review */}
         {planned.length > 0 && (
           <div className="mb-3 border border-border-soft">
@@ -232,12 +302,6 @@ export default function SceneAgentPanel({
             </div>
           </div>
         ))}
-        {events.length === 0 && planned.length === 0 && escalated.length === 0 && (
-          <p className="font-mono text-[10px] leading-relaxed text-muted">
-            Press ✦ IMAGES FROM SCRIPT on the shots canvas to have the agent
-            plan the sequence from your script and location map.
-          </p>
-        )}
       </div>
 
       {/* Footer: approval gate / resume */}
