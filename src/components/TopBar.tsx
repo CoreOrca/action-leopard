@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { createNewProject } from "@/lib/projects";
 import { IMAGE_MODELS, VIDEO_MODELS } from "@/lib/models";
 import { useWorkspace } from "@/lib/store";
+import type { ProjectType } from "@/lib/types";
 
 export default function TopBar({
   onPatchProject,
@@ -17,6 +19,7 @@ export default function TopBar({
   const [email, setEmail] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [newOpen, setNewOpen] = useState(false);
   const [dark, setDark] = useState(true);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -46,20 +49,12 @@ export default function TopBar({
     router.refresh();
   }
 
-  async function createProject() {
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data, error } = await supabase
-      .from("projects")
-      .insert({ user_id: user.id, name: "Untitled project" })
-      .select()
-      .single();
-    if (!error && data) {
+  async function createProject(type: ProjectType) {
+    const id = await createNewProject(type);
+    if (id) {
+      setNewOpen(false);
       setDrawerOpen(false);
-      router.push(`/studio/${data.id}`);
+      router.push(`/studio/${id}`);
     }
   }
 
@@ -180,11 +175,27 @@ export default function TopBar({
             Assets
           </Link>
           <button
-            onClick={createProject}
+            onClick={() => setNewOpen((o) => !o)}
             className="block w-full border-b border-border-soft px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider hover:bg-foreground hover:text-background"
           >
-            + New project
+            + New project {newOpen ? "▾" : "▸"}
           </button>
+          {newOpen && (
+            <>
+              <button
+                onClick={() => createProject("shot")}
+                className="block w-full border-b border-border-soft px-4 py-3 pl-8 text-left font-mono text-[11px] uppercase tracking-wider hover:bg-foreground hover:text-background"
+              >
+                Single shot
+              </button>
+              <button
+                onClick={() => createProject("scene")}
+                className="block w-full border-b border-border-soft px-4 py-3 pl-8 text-left font-mono text-[11px] uppercase tracking-wider hover:bg-foreground hover:text-background"
+              >
+                Create a scene
+              </button>
+            </>
+          )}
           <div className="px-4 py-3 font-mono text-[10px] uppercase tracking-wider text-muted">
             {project?.name}
           </div>

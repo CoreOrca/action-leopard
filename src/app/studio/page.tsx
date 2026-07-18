@@ -3,13 +3,15 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import type { Project } from "@/lib/types";
+import { createNewProject } from "@/lib/projects";
+import type { Project, ProjectType } from "@/lib/types";
 
 export default function StudioPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState<string>("");
+  const [chooserOpen, setChooserOpen] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -24,18 +26,10 @@ export default function StudioPage() {
       });
   }, []);
 
-  async function createProject() {
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data, error } = await supabase
-      .from("projects")
-      .insert({ user_id: user.id, name: "Untitled project" })
-      .select()
-      .single();
-    if (!error && data) router.push(`/studio/${data.id}`);
+  async function createProject(type: ProjectType) {
+    setChooserOpen(false);
+    const id = await createNewProject(type);
+    if (id) router.push(`/studio/${id}`);
   }
 
   async function deleteProject(id: string) {
@@ -72,12 +66,36 @@ export default function StudioPage() {
           <h1 className="font-mono text-sm uppercase tracking-widest text-muted">
             Projects
           </h1>
-          <button
-            onClick={createProject}
-            className="border border-foreground px-4 py-2 font-mono text-xs uppercase tracking-widest hover:bg-foreground hover:text-background transition-colors"
-          >
-            + New project
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setChooserOpen((o) => !o)}
+              className="border border-foreground px-4 py-2 font-mono text-xs uppercase tracking-widest hover:bg-foreground hover:text-background transition-colors"
+            >
+              + New project
+            </button>
+            {chooserOpen && (
+              <div className="absolute right-0 top-full z-10 mt-1 w-56 border border-border bg-background">
+                <button
+                  onClick={() => createProject("shot")}
+                  className="block w-full border-b border-border-soft px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider hover:bg-foreground hover:text-background"
+                >
+                  Single shot
+                  <span className="mt-0.5 block text-[9px] normal-case tracking-normal opacity-60">
+                    Fix one shot's action by hand
+                  </span>
+                </button>
+                <button
+                  onClick={() => createProject("scene")}
+                  className="block w-full px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider hover:bg-foreground hover:text-background"
+                >
+                  Create a scene
+                  <span className="mt-0.5 block text-[9px] normal-case tracking-normal opacity-60">
+                    Agent plans shots from your script
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -95,7 +113,14 @@ export default function StudioPage() {
                 onClick={() => router.push(`/studio/${p.id}`)}
               >
                 <div>
-                  <div className="text-sm">{p.name}</div>
+                  <div className="flex items-center gap-2 text-sm">
+                    {p.name}
+                    {p.project_type === "scene" && (
+                      <span className="border border-border-soft px-1 py-px font-mono text-[9px] uppercase tracking-wider text-muted">
+                        Scene
+                      </span>
+                    )}
+                  </div>
                   <div className="font-mono text-[10px] text-muted mt-0.5">
                     {new Date(p.updated_at).toLocaleString()}
                   </div>
