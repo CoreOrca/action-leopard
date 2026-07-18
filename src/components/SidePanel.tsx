@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useWorkspace } from "@/lib/store";
 import { saveBlobAsAsset } from "@/lib/canvas";
-import type { Element, ElementKind } from "@/lib/types";
+import type { Element, ElementKind, LocationMapEntry } from "@/lib/types";
 
 const KINDS: ElementKind[] = [
   "character",
@@ -37,7 +37,49 @@ export default function SidePanel({
   const refInput = useRef<HTMLInputElement>(null);
   const adInput = useRef<HTMLInputElement>(null);
   const elImgInput = useRef<HTMLInputElement>(null);
+  const locInput = useRef<HTMLInputElement>(null);
   const [pendingElementId, setPendingElementId] = useState<string | null>(null);
+
+  const isScene = project?.project_type === "scene";
+
+  function saveLocationMap(next: LocationMapEntry[]) {
+    patchProject({ location_map: next });
+    onPatchProject({ location_map: next });
+  }
+
+  async function uploadLocationImage(file: File) {
+    if (!project) return;
+    setBusy("Uploading location image…");
+    try {
+      const asset = await saveBlobAsAsset(file, {
+        projectId,
+        type: "reference",
+        pathname: `projects/${projectId}/locations/${file.name}`,
+      });
+      addAssets([asset]);
+      saveLocationMap([
+        ...(project.location_map ?? []),
+        {
+          asset_id: asset.id,
+          url: asset.url,
+          label: `Location ${(project.location_map?.length ?? 0) + 1}`,
+        },
+      ]);
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function moveLocation(index: number, dir: -1 | 1) {
+    if (!project) return;
+    const next = [...(project.location_map ?? [])];
+    const j = index + dir;
+    if (j < 0 || j >= next.length) return;
+    [next[index], next[j]] = [next[j], next[index]];
+    saveLocationMap(next);
+  }
 
   async function uploadReference(file: File) {
     setBusy("Uploading reference…");
@@ -151,35 +193,135 @@ export default function SidePanel({
         </button>
       </div>
 
-      {/* Reference image */}
-      <div>
-        <h3 className="mb-1 font-mono text-[10px] uppercase tracking-widest text-muted">
-          Reference image (location)
-        </h3>
-        {project.reference_image_url ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={project.reference_image_url}
-            alt="reference"
-            className="mb-1 w-full border border-border-soft"
+      {/* Script (scene projects) */}
+      {isScene && (
+        <div>
+          <h3 className="mb-1 font-mono text-[10px] uppercase tracking-widest text-muted">
+            Script
+          </h3>
+          <textarea
+            value={project.script ?? ""}
+            onChange={(e) => {
+              patchProject({ script: e.target.value });
+              onPatchProject({ script: e.target.value });
+            }}
+            placeholder="Paste the action sequence — the agent parses it into shots…"
+            rows={8}
+            className="w-full border border-border-soft bg-transparent p-2 text-xs outline-none focus:border-border"
           />
-        ) : null}
-        <button
-          onClick={() => refInput.current?.click()}
-          className="w-full border border-border px-2 py-2 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background"
-        >
-          {project.reference_image_url ? "Replace" : "Upload"} reference
-        </button>
-        <input
-          ref={refInput}
-          type="file"
-          accept="image/*"
-          hidden
-          onChange={(e) =>
-            e.target.files?.[0] && uploadReference(e.target.files[0])
-          }
-        />
-      </div>
+        </div>
+      )}
+
+      {/* Location map (scene) vs single reference image (shot) */}
+      {isScene ? (
+        <div>
+          <h3 className="mb-1 font-mono text-[10px] uppercase tracking-widest text-muted">
+            Location map — path in order
+          </h3>
+          <div className="flex flex-col gap-1">
+            {(project.location_map ?? []).map((loc, i) => (
+              <div
+                key={loc.asset_id}
+                className="group flex items-center gap-2 border border-border-soft p-1"
+              >
+                <span className="w-4 text-center font-mono text-[10px] text-muted">
+                  {i + 1}
+                </span>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={loc.url}
+                  alt={loc.label}
+                  className="h-10 w-16 border border-border-soft object-cover"
+                  loading="lazy"
+                />
+                <input
+                  value={loc.label}
+                  onChange={(e) => {
+                    const next = [...project.location_map];
+                    next[i] = { ...next[i], label: e.target.value };
+                    saveLocationMap(next);
+                  }}
+                  className="min-w-0 flex-1 bg-transparent text-[10px] outline-none"
+                />
+                <div className="hidden items-center gap-0.5 group-hover:flex">
+                  <button
+                    onClick={() => moveLocation(i, -1)}
+                    disabled={i === 0}
+                    className="border border-border-soft px-1 font-mono text-[9px] hover:border-border disabled:opacity-30"
+                    title="Earlier in the path"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    onClick={() => moveLocation(i, 1)}
+                    disabled={i === project.location_map.length - 1}
+                    className="border border-border-soft px-1 font-mono text-[9px] hover:border-border disabled:opacity-30"
+                    title="Later in the path"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    onClick={() =>
+                      saveLocationMap(
+                        project.location_map.filter((_, j) => j !== i)
+                      )
+                    }
+                    className="border border-border-soft px-1 font-mono text-[9px] text-muted hover:border-danger hover:text-danger"
+                    title="Remove from path"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={() => locInput.current?.click()}
+            className="mt-1 w-full border border-border px-2 py-2 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background"
+          >
+            + Location image
+          </button>
+          <input
+            ref={locInput}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              if (e.target.files?.[0]) uploadLocationImage(e.target.files[0]);
+              e.target.value = "";
+            }}
+          />
+        </div>
+      ) : (
+        <div>
+          <h3 className="mb-1 font-mono text-[10px] uppercase tracking-widest text-muted">
+            Reference image (location)
+          </h3>
+          {project.reference_image_url ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={project.reference_image_url}
+              alt="reference"
+              className="mb-1 w-full border border-border-soft"
+            />
+          ) : null}
+          <button
+            onClick={() => refInput.current?.click()}
+            className="w-full border border-border px-2 py-2 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background"
+          >
+            {project.reference_image_url ? "Replace" : "Upload"} reference
+          </button>
+          <input
+            ref={refInput}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) =>
+              e.target.files?.[0] && uploadReference(e.target.files[0])
+            }
+          />
+        </div>
+      )}
 
       {/* Art direction */}
       <div>

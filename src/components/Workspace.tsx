@@ -4,8 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Editor } from "tldraw";
 import { createClient } from "@/lib/supabase/client";
 import { useWorkspace } from "@/lib/store";
+import { useSceneAgent } from "@/lib/scene-store";
 import { imageToCanvasBackground } from "@/lib/canvas";
-import type { Asset, Element, Project } from "@/lib/types";
+import type { Asset, Element, Project, Shot } from "@/lib/types";
 import TopBar from "./TopBar";
 import SidePanel from "./SidePanel";
 import CanvasPanel from "./CanvasPanel";
@@ -13,6 +14,7 @@ import PreviewPanel from "./PreviewPanel";
 import PromptBar from "./PromptBar";
 import VideoStrip from "./VideoStrip";
 import AgentModal from "./AgentModal";
+import ShotsCanvas from "./ShotsCanvas";
 
 export default function Workspace({ projectId }: { projectId: string }) {
   const {
@@ -41,16 +43,24 @@ export default function Workspace({ projectId }: { projectId: string }) {
         .eq("project_id", projectId)
         .order("sort_order")
         .order("created_at"),
-    ]).then(([p, e, a]) => {
+      supabase
+        .from("shots")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("sort_order")
+        .order("created_at"),
+    ]).then(([p, e, a, s]) => {
       setProject((p.data as Project) ?? null);
       setElements((e.data as Element[]) ?? []);
       setAssets((a.data as Asset[]) ?? []);
+      useSceneAgent.getState().setShots((s.data as Shot[]) ?? []);
       setLoaded(true);
     });
     return () => {
       setProject(null);
       setElements([]);
       setAssets([]);
+      useSceneAgent.getState().resetScene();
     };
   }, [projectId, setProject, setElements, setAssets]);
 
@@ -91,6 +101,8 @@ export default function Workspace({ projectId }: { projectId: string }) {
     );
   }
 
+  const isScene = project.project_type === "scene";
+
   return (
     <main className="flex h-screen flex-col bg-background text-foreground">
       <TopBar onPatchProject={patchProject} />
@@ -99,17 +111,23 @@ export default function Workspace({ projectId }: { projectId: string }) {
         <SidePanel projectId={projectId} onPatchProject={patchProject} />
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">
-          <div className="flex min-h-0 min-w-0 flex-1 gap-2">
-            <CanvasPanel
-              projectId={projectId}
-              onEditorReady={setEditor}
-              onSnapshotChange={onSnapshotChange}
-              onPatchProject={patchProject}
-            />
-            <PreviewPanel projectId={projectId} onAnnotate={onAnnotate} />
-          </div>
-          <PromptBar projectId={projectId} onPatchProject={patchProject} />
-          <VideoStrip />
+          {isScene && <SceneTabs />}
+          {isScene && <SceneShotsPane projectId={projectId} />}
+          {/* Fix-it view: kept mounted across tab flips so the tldraw editor
+              and canvas snapshot lifecycle never re-fire. */}
+          <FixitPane isScene={isScene}>
+            <div className="flex min-h-0 min-w-0 flex-1 gap-2">
+              <CanvasPanel
+                projectId={projectId}
+                onEditorReady={setEditor}
+                onSnapshotChange={onSnapshotChange}
+                onPatchProject={patchProject}
+              />
+              <PreviewPanel projectId={projectId} onAnnotate={onAnnotate} />
+            </div>
+            <PromptBar projectId={projectId} onPatchProject={patchProject} />
+            <VideoStrip />
+          </FixitPane>
         </div>
       </div>
 
@@ -121,5 +139,73 @@ export default function Workspace({ projectId }: { projectId: string }) {
 
       <AgentModal projectId={projectId} editor={editor} />
     </main>
+  );
+}
+
+/** Tab strip for scene projects: shots canvas vs the manual fix-it view. */
+function SceneTabs() {
+  const { view, setView, activeShotId, shots } = useSceneAgent();
+  const active = shots.find((s) => s.id === activeShotId);
+  const activeIndex = active ? shots.indexOf(active) + 1 : null;
+  return (
+    <div className="flex items-center gap-0">
+      {(["shots", "fixit"] as const).map((v) => (
+        <button
+          key={v}
+          onClick={() => setView(v)}
+          className={`border px-3 py-1 font-mono text-[10px] uppercase tracking-wider ${
+            view === v
+              ? "border-foreground bg-foreground text-background"
+              : "border-border-soft text-muted hover:border-border"
+          }`}
+        >
+          {v === "shots" ? "Shots" : "Fix-it"}
+        </button>
+      ))}
+      {view === "fixit" && active && (
+        <button
+          onClick={() => setView("shots")}
+          className="ml-3 font-mono text-[10px] uppercase tracking-wider text-muted hover:text-foreground"
+          title="Back to the shots canvas"
+        >
+          ◀ Shot {activeIndex}
+          {active.title ? ` — ${active.title}` : ""}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SceneShotsPane({ projectId }: { projectId: string }) {
+  const view = useSceneAgent((s) => s.view);
+  return (
+    <div className={view === "shots" ? "flex min-h-0 min-w-0 flex-1" : "hidden"}>
+      <ShotsCanvas projectId={projectId} />
+    </div>
+  );
+}
+
+/**
+ * Hosts the manual fix-it stack. For single-shot projects it renders children
+ * directly (unchanged DOM). For scene projects it mounts them lazily on the
+ * first visit to the fix-it tab (so tldraw never mounts at 0×0), then keeps
+ * them mounted-but-hidden so the editor survives tab flips.
+ */
+function FixitPane({
+  isScene,
+  children,
+}: {
+  isScene: boolean;
+  children: React.ReactNode;
+}) {
+  const view = useSceneAgent((s) => s.view);
+  const [everShown, setEverShown] = useState(!isScene);
+  useEffect(() => {
+    if (isScene && view === "fixit") setEverShown(true);
+  }, [isScene, view]);
+  if (!isScene) return <>{children}</>;
+  if (!everShown) return null;
+  return (
+    <div className={view === "fixit" ? "contents" : "hidden"}>{children}</div>
   );
 }
