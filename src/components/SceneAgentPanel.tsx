@@ -71,6 +71,8 @@ export default function SceneAgentPanel({
   onMakeEndFrames,
   onRetryShot,
   onAcceptShot,
+  onApproveVersion,
+  onUploadFrame,
   onPlanScene,
   onPatchProject,
 }: {
@@ -81,11 +83,15 @@ export default function SceneAgentPanel({
   onMakeEndFrames?: () => void;
   onRetryShot?: (shotId: string) => void;
   onAcceptShot?: (shotId: string) => void;
+  onApproveVersion?: (shotId: string, assetId: string) => void;
+  onUploadFrame?: (shotId: string, file: File) => void;
   onPlanScene?: () => void;
   onPatchProject?: (patch: Record<string, unknown>) => void;
 }) {
   const [dryRun, setDryRun] = useState(false);
-  const { project, patchProject } = useWorkspace();
+  const { project, patchProject, assets } = useWorkspace();
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const uploadShotId = useRef<string | null>(null);
   const {
     panelOpen,
     setPanelOpen,
@@ -442,14 +448,25 @@ export default function SceneAgentPanel({
           </div>
         )}
 
-        {/* Escalations */}
+        {/* Escalations — a light approve/upload/retry choice, never homework. */}
         {escalated.map((shot) => {
           const verdict = shot.judge?.last;
           const idx = shots.indexOf(shot) + 1;
+          const versions = assets
+            .filter(
+              (a) =>
+                a.metadata?.shot_id === shot.id &&
+                a.metadata?.shot_role === "start"
+            )
+            .sort(
+              (a, b) =>
+                ((a.metadata?.version as number) ?? 0) -
+                ((b.metadata?.version as number) ?? 0)
+            );
           return (
             <div key={shot.id} className="mb-3 border border-danger">
               <div className="border-b border-danger px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-danger">
-                Shot {idx} needs you — auto-fixes exhausted
+                Shot {idx} needs your call
               </div>
               <div className="p-2">
                 {verdict?.summary && (
@@ -463,7 +480,44 @@ export default function SceneAgentPanel({
                       {c.issue ? ` — ${c.issue}` : ""}
                     </p>
                   ))}
-                <div className="mt-2 flex gap-1">
+                {versions.length > 0 && (
+                  <>
+                    <p className="mt-2 font-mono text-[9px] uppercase tracking-wider text-muted">
+                      Click a frame to approve it and keep going
+                    </p>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {versions.map((a) => {
+                        const current = a.id === shot.start_asset_id;
+                        return (
+                          <button
+                            key={a.id}
+                            onClick={() => onApproveVersion?.(shot.id, a.id)}
+                            disabled={!onApproveVersion || busy}
+                            className={`relative border disabled:opacity-40 ${
+                              current
+                                ? "border-foreground"
+                                : "border-border-soft hover:border-foreground"
+                            }`}
+                            title="Approve this version as the shot's start frame"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={a.url}
+                              alt=""
+                              className="aspect-video h-16 object-cover"
+                              loading="lazy"
+                            />
+                            <span className="absolute bottom-0 left-0 bg-background px-1 font-mono text-[9px]">
+                              v{(a.metadata?.version as number) ?? "?"}
+                              {current ? " · latest" : ""}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+                <div className="mt-2 flex flex-wrap gap-1">
                   <button
                     onClick={() => onRetryShot?.(shot.id)}
                     disabled={!onRetryShot || busy}
@@ -473,19 +527,32 @@ export default function SceneAgentPanel({
                     Retry
                   </button>
                   <button
-                    onClick={() => onAcceptShot?.(shot.id)}
-                    disabled={!onAcceptShot || busy}
+                    onClick={() => {
+                      uploadShotId.current = shot.id;
+                      uploadRef.current?.click();
+                    }}
+                    disabled={!onUploadFrame || busy}
                     className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border disabled:opacity-40"
-                    title="Keep the current frame as-is"
+                    title="Use your own image as this shot's start frame"
                   >
-                    Accept anyway
+                    Upload frame
                   </button>
+                  {versions.length === 0 && (
+                    <button
+                      onClick={() => onAcceptShot?.(shot.id)}
+                      disabled={!onAcceptShot || busy}
+                      className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border disabled:opacity-40"
+                      title="Keep the current frame as-is"
+                    >
+                      Accept anyway
+                    </button>
+                  )}
                   <button
                     onClick={() => openInFixit(shot.id)}
                     className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border"
-                    title="Open this shot in the manual fix-it view"
+                    title="Open this shot's detail view — prompts, inputs, and canvas tools"
                   >
-                    Open in fix-it
+                    Shot detail
                   </button>
                 </div>
               </div>
@@ -526,6 +593,18 @@ export default function SceneAgentPanel({
           </div>
         ))}
       </div>
+
+      <input
+        ref={uploadRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f && uploadShotId.current) onUploadFrame?.(uploadShotId.current, f);
+          e.target.value = "";
+        }}
+      />
 
       {/* Footer: run controls */}
       <div className="shrink-0 border-t border-border-soft p-2">

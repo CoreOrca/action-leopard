@@ -15,6 +15,7 @@ import PromptBar from "./PromptBar";
 import VideoStrip from "./VideoStrip";
 import AgentModal from "./AgentModal";
 import ShotsCanvas from "./ShotsCanvas";
+import ShotInputs from "./ShotInputs";
 import SceneAgentPanel from "./SceneAgentPanel";
 import {
   planScene,
@@ -26,6 +27,8 @@ import {
   makeEndFrames,
   cancelRun,
   replanScene,
+  approveShotFrame,
+  uploadShotStartFrame,
 } from "@/lib/scene-agent";
 
 export default function Workspace({ projectId }: { projectId: string }) {
@@ -144,6 +147,7 @@ export default function Workspace({ projectId }: { projectId: string }) {
               />
               <PreviewPanel projectId={projectId} onAnnotate={onAnnotate} />
             </div>
+            <ShotInputs />
             <PromptBar projectId={projectId} onPatchProject={patchProject} />
             <VideoStrip />
           </FixitPane>
@@ -166,6 +170,8 @@ export default function Workspace({ projectId }: { projectId: string }) {
           onMakeEndFrames={() => makeEndFrames()}
           onRetryShot={(id) => retryShot(id)}
           onAcceptShot={(id) => acceptShot(id)}
+          onApproveVersion={(id, assetId) => approveShotFrame(id, assetId)}
+          onUploadFrame={(id, file) => uploadShotStartFrame(projectId, id, file)}
           onPlanScene={() => planScene()}
           onPatchProject={patchProject}
         />
@@ -174,36 +180,41 @@ export default function Workspace({ projectId }: { projectId: string }) {
   );
 }
 
-/** Tab strip for scene projects: shots canvas vs the manual fix-it view. */
+/** Tab strip for scene projects: shots canvas vs the per-shot detail view.
+ *  The center cell hosts the shots-canvas toolbar (portaled from ShotsCanvas). */
 function SceneTabs() {
   const { view, setView, activeShotId, shots } = useSceneAgent();
   const active = shots.find((s) => s.id === activeShotId);
   const activeIndex = active ? shots.indexOf(active) + 1 : null;
   return (
-    <div className="flex items-center gap-0">
-      {(["shots", "fixit"] as const).map((v) => (
-        <button
-          key={v}
-          onClick={() => setView(v)}
-          className={`border px-3 py-1 font-mono text-[10px] uppercase tracking-wider ${
-            view === v
-              ? "border-foreground bg-foreground text-background"
-              : "border-border-soft text-muted hover:border-border"
-          }`}
-        >
-          {v === "shots" ? "Shots" : "Fix-it"}
-        </button>
-      ))}
-      {view === "fixit" && active && (
-        <button
-          onClick={() => setView("shots")}
-          className="ml-3 font-mono text-[10px] uppercase tracking-wider text-muted hover:text-foreground"
-          title="Back to the shots canvas"
-        >
-          ◀ Shot {activeIndex}
-          {active.title ? ` — ${active.title}` : ""}
-        </button>
-      )}
+    <div className="grid grid-cols-[1fr_auto_1fr] items-center">
+      <div className="flex items-center gap-0">
+        {(["shots", "fixit"] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={`border px-3 py-1 font-mono text-[10px] uppercase tracking-wider ${
+              view === v
+                ? "border-foreground bg-foreground text-background"
+                : "border-border-soft text-muted hover:border-border"
+            }`}
+          >
+            {v === "shots" ? "Shots" : "Shot detail"}
+          </button>
+        ))}
+        {view === "fixit" && active && (
+          <button
+            onClick={() => setView("shots")}
+            className="ml-3 font-mono text-[10px] uppercase tracking-wider text-muted hover:text-foreground"
+            title="Back to the shots canvas"
+          >
+            ◀ Shot {activeIndex}
+            {active.title ? ` — ${active.title}` : ""}
+          </button>
+        )}
+      </div>
+      <div id="scene-toolbar-slot" className="flex justify-center" />
+      <div />
     </div>
   );
 }

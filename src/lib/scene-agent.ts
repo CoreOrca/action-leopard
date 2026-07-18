@@ -127,6 +127,26 @@ export async function planScene(): Promise<void> {
     );
     scene.setShots([...kept, ...inserted]);
 
+    // Persist the scene-level premise invariants — the judge and fixer read
+    // them on every pass (pursuit order, direction of travel).
+    const invariants = (plan.invariants ?? []).filter(Boolean);
+    if (invariants.length) {
+      const scene_meta = {
+        ...(project.scene_meta ?? {}),
+        summary: plan.summary,
+        invariants,
+      };
+      useWorkspace.getState().patchProject({ scene_meta });
+      await createClient()
+        .from("projects")
+        .update({ scene_meta })
+        .eq("id", project.id);
+      scene.pushEvent({
+        kind: "info",
+        text: `Scene invariants:\n${invariants.map((s) => `— ${s}`).join("\n")}`,
+      });
+    }
+
     for (const p of plan.shots) {
       scene.pushEvent({
         kind: "plan",
@@ -150,7 +170,15 @@ export async function planScene(): Promise<void> {
  * its predecessor's JUDGE-APPROVED frame, never a broken one.
  * ------------------------------------------------------------------------- */
 
-type InputChip = { key: string; url: string; role: string };
+export type InputChip = { key: string; url: string; role: string };
+
+/** The exact generator inputs a shot receives — for the shot-detail view. */
+export function shotGenerationInputs(project: Project, shot: Shot): InputChip[] {
+  return buildInputs(project, shot, {
+    add: new Set<string>(),
+    remove: new Set<string>(),
+  });
+}
 
 const getShot = (id: string) =>
   useSceneAgent.getState().shots.find((s) => s.id === id);
@@ -381,6 +409,7 @@ async function judgeFrame(
       nextEntry: (next?.spec as Partial<ShotSpec> | undefined)?.entry_continuity,
       scaleAnchors: spec.scale_anchors,
       artDirection: project.art_direction,
+      invariants: useWorkspace.getState().project?.scene_meta?.invariants,
     }),
   });
   const data = await res.json();
@@ -432,6 +461,7 @@ async function fixPrompt(
       })),
       artDirection: project.art_direction,
       scaleAnchors: spec.scale_anchors,
+      invariants: useWorkspace.getState().project?.scene_meta?.invariants,
     }),
   });
   const data = await res.json();
@@ -487,19 +517,15 @@ async function processShot(
           .join(", ")})`,
       });
 
-      const needsHuman =
-        verdict.fix?.strategy === "canvas-blocking" ||
-        shot.revision_count >= MAX_AUTO_FIXES;
-      if (needsHuman) {
+      // Canvas-blocking verdicts no longer short-circuit to the human — the
+      // fixer rewrites the camera-geometry paragraph instead; only the fix
+      // cap escalates, and escalation is a light approve/upload/retry choice.
+      if (shot.revision_count >= MAX_AUTO_FIXES) {
         await persistShot(shotId, { status: "escalated" });
         scene.pushEvent({
           kind: "escalate",
           shotId,
-          text: `${shotLabel(shotId)}: needs you — ${
-            verdict.fix?.strategy === "canvas-blocking"
-              ? "the judge says only a blocking diagram will fix placement (open it in fix-it)"
-              : `${MAX_AUTO_FIXES} auto-fixes exhausted`
-          }.`,
+          text: `${shotLabel(shotId)}: needs your call — ${MAX_AUTO_FIXES} auto-fixes used. Approve any version, upload your own frame, or retry.`,
         });
         return;
       }
@@ -879,6 +905,59 @@ export async function acceptShot(shotId: string): Promise<void> {
     kind: "info",
     shotId,
     text: `${shotLabel(shotId)}: accepted as-is.`,
+  });
+  scene.setPhase(computeResume(useSceneAgent.getState().shots).phase);
+}
+
+/**
+ * Escalation: user approves a specific generated version (the judge may have
+ * discarded a frame the user likes better) — it becomes the shot's start
+ * frame and the shot is accepted.
+ */
+export async function approveShotFrame(
+  shotId: string,
+  assetId: string
+): Promise<void> {
+  const asset = assetById(assetId);
+  await persistShot(shotId, { start_asset_id: assetId, status: "accepted" });
+  const scene = useSceneAgent.getState();
+  scene.pushEvent({
+    kind: "info",
+    shotId,
+    text: `${shotLabel(shotId)}: approved v${asset?.metadata?.version ?? "?"}.`,
+    imageUrl: asset?.url,
+  });
+  scene.setPhase(computeResume(useSceneAgent.getState().shots).phase);
+}
+
+/** User supplies their own start frame for a shot; the shot is accepted. */
+export async function uploadShotStartFrame(
+  projectId: string,
+  shotId: string,
+  file: File
+): Promise<void> {
+  const { saveBlobAsAsset } = await import("./canvas");
+  const version =
+    useWorkspace
+      .getState()
+      .assets.filter(
+        (a) =>
+          a.metadata?.shot_id === shotId && a.metadata?.shot_role === "start"
+      ).length + 1;
+  const asset = await saveBlobAsAsset(file, {
+    projectId,
+    type: "image",
+    pathname: `projects/${projectId}/shots/${shotId}/${file.name}`,
+    metadata: { shot_id: shotId, shot_role: "start", version, manual: true },
+  });
+  useWorkspace.getState().addAssets([asset]);
+  await persistShot(shotId, { start_asset_id: asset.id, status: "accepted" });
+  const scene = useSceneAgent.getState();
+  scene.pushEvent({
+    kind: "info",
+    shotId,
+    text: `${shotLabel(shotId)}: using your uploaded frame.`,
+    imageUrl: asset.url,
   });
   scene.setPhase(computeResume(useSceneAgent.getState().shots).phase);
 }

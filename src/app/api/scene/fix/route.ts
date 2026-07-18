@@ -17,6 +17,8 @@ interface FixBody {
   imageRoles?: { url: string; role: string }[];
   artDirection?: string;
   scaleAnchors?: string[];
+  /** Scene-level premise invariants (who chases whom, direction of travel). */
+  invariants?: string[];
 }
 
 export async function POST(request: Request) {
@@ -34,6 +36,11 @@ export async function POST(request: Request) {
   const system = `${IMAGE_PROMPT_SYSTEM}${directive ? `\n\n${directive}` : ""}\n${SHOT_FIX_ADDENDUM}`;
 
   const lines = [
+    body.invariants?.length
+      ? `SCENE INVARIANTS (the premise — the rewritten prompt must stage these as hard facts unless the spec states an exception):\n${body.invariants
+          .map((s) => `- ${s}`)
+          .join("\n")}`
+      : "",
     `SHOT SPEC:\n${JSON.stringify(body.spec ?? {}, null, 2)}`,
     body.scaleAnchors?.length
       ? `REAL-WORLD SCALE ANCHORS (cite these, with the subject's ratio to them):\n${body.scaleAnchors

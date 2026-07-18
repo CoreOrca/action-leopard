@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useWorkspace } from "@/lib/store";
 import { useSceneAgent } from "@/lib/scene-store";
-import { insertShot, patchShot, deleteShot, reorderShots } from "@/lib/shots";
-import { saveBlobAsAsset } from "@/lib/canvas";
+import { insertShot, deleteShot, reorderShots } from "@/lib/shots";
+import { uploadShotStartFrame } from "@/lib/scene-agent";
 import { desktopDragProps, downloadAsset } from "@/lib/download";
 import type { Shot } from "@/lib/types";
 
@@ -16,6 +17,7 @@ const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2;
 
 const STATUS_LABEL: Partial<Record<Shot["status"], string>> = {
+  planned: "planned",
   generating: "generating…",
   judging: "judging…",
   fixing: "fixing…",
@@ -30,20 +32,25 @@ export default function ShotsCanvas({
   projectId: string;
   onMakeVideo?: () => void;
 }) {
-  const { assets, addAssets, setBusy, busy } = useWorkspace();
+  const { assets, setBusy, busy } = useWorkspace();
   const {
     shots,
     activeShotId,
     setActiveShot,
+    view,
     setView,
     setShots,
     addShots,
     removeShot,
-    patchShotLocal,
   } = useSceneAgent();
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const uploadInput = useRef<HTMLInputElement>(null);
+  /** The toolbar renders into the centered slot of the scene tab row. */
+  const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setToolbarSlot(document.getElementById("scene-toolbar-slot"));
+  }, []);
   const [cam, setCam] = useState({ x: 48, y: 64, z: 1 });
   const drag = useRef<{ startX: number; startY: number; camX: number; camY: number } | null>(null);
 
@@ -157,21 +164,7 @@ export default function ShotsCanvas({
     if (!shot) return;
     setBusy("Uploading start frame…");
     try {
-      const version =
-        assets.filter(
-          (a) =>
-            a.metadata?.shot_id === shot.id && a.metadata?.shot_role === "start"
-        ).length + 1;
-      const asset = await saveBlobAsAsset(file, {
-        projectId,
-        type: "image",
-        pathname: `projects/${projectId}/shots/${shot.id}/${file.name}`,
-        metadata: { shot_id: shot.id, shot_role: "start", version, manual: true },
-      });
-      addAssets([asset]);
-      const patch: Partial<Shot> = { start_asset_id: asset.id, status: "accepted" };
-      patchShotLocal(shot.id, patch);
-      await patchShot(shot.id, patch);
+      await uploadShotStartFrame(projectId, shot.id, file);
     } catch (e) {
       alert((e as Error).message);
     } finally {
@@ -187,10 +180,8 @@ export default function ShotsCanvas({
   const assetUrl = (id: string | null) =>
     id ? assets.find((a) => a.id === id)?.url ?? null : null;
 
-  return (
-    <section className="isolate relative z-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border border-border-soft">
-      {/* Toolbar */}
-      <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-1 border border-border bg-background p-1">
+  const toolbar = (
+    <div className="flex items-center gap-1">
         <button
           onClick={onMakeVideo}
           disabled={!onMakeVideo || !!busy}
@@ -230,7 +221,12 @@ export default function ShotsCanvas({
         >
           +
         </button>
-      </div>
+    </div>
+  );
+
+  return (
+    <section className="isolate relative z-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border border-border-soft">
+      {toolbarSlot && view === "shots" && createPortal(toolbar, toolbarSlot)}
 
       {/* Viewport */}
       <div

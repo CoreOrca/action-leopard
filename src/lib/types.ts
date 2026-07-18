@@ -34,7 +34,12 @@ export interface Project {
   canvas_snapshot: unknown | null;
   current_prompt: string;
   prompts: { image_a?: string; image_b?: string; video?: string };
-  scene_meta: { summary?: string; scale_anchors?: string[] };
+  scene_meta: {
+    summary?: string;
+    scale_anchors?: string[];
+    /** Scene projects: the planner's premise invariants, fed to judge + fixer. */
+    invariants?: string[];
+  };
   image_model: string;
   video_model: string;
   project_type: ProjectType;
@@ -231,5 +236,8 @@ export interface PlannedShot {
 
 export interface ScenePlan {
   summary: string;
+  /** Scene-level premise facts (who chases whom, direction of travel) that
+   *  every frame must honor unless a spec stages a deliberate exception. */
+  invariants?: string[];
   shots: PlannedShot[];
 }

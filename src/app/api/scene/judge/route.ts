@@ -78,6 +78,8 @@ interface JudgeBody {
   nextEntry?: string;
   scaleAnchors?: string[];
   artDirection?: string;
+  /** Scene-level premise invariants (who chases whom, direction of travel). */
+  invariants?: string[];
 }
 
 export async function POST(request: Request) {
@@ -97,6 +99,11 @@ export async function POST(request: Request) {
 
   const lines = [
     `SHOT${body.shot.title ? ` — ${body.shot.title}` : ""} (frame version ${body.shot.version}):`,
+    body.invariants?.length
+      ? `SCENE INVARIANTS (the premise — must hold in every frame unless the spec stages a deliberate exception):\n${body.invariants
+          .map((s) => `- ${s}`)
+          .join("\n")}`
+      : "",
     `SPEC:\n${JSON.stringify(spec, null, 2)}`,
     body.nextEntry
       ? `NEXT SHOT'S ENTRY STATE (the action must be headed here): ${body.nextEntry}`
