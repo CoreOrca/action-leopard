@@ -16,7 +16,13 @@ import VideoStrip from "./VideoStrip";
 import AgentModal from "./AgentModal";
 import ShotsCanvas from "./ShotsCanvas";
 import SceneAgentPanel from "./SceneAgentPanel";
-import { planScene, computeResume } from "@/lib/scene-agent";
+import {
+  planScene,
+  computeResume,
+  runScene,
+  retryShot,
+  acceptShot,
+} from "@/lib/scene-agent";
 
 export default function Workspace({ projectId }: { projectId: string }) {
   const {
@@ -143,7 +149,14 @@ export default function Workspace({ projectId }: { projectId: string }) {
       )}
 
       <AgentModal projectId={projectId} editor={editor} />
-      {isScene && <SceneAgentPanel />}
+      {isScene && (
+        <SceneAgentPanel
+          onGenerate={(dryRun) => runScene({ dryRun })}
+          onResume={() => runScene()}
+          onRetryShot={(id) => retryShot(id)}
+          onAcceptShot={(id) => acceptShot(id)}
+        />
+      )}
     </main>
   );
 }

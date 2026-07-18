@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useWorkspace } from "@/lib/store";
 import { useSceneAgent, type ScenePhase, type SceneAgentEvent } from "@/lib/scene-store";
 import { MAX_AUTO_FIXES } from "@/lib/scene-agent";
@@ -31,11 +31,12 @@ export default function SceneAgentPanel({
   onRetryShot,
   onAcceptShot,
 }: {
-  onGenerate?: () => void;
+  onGenerate?: (dryRun?: boolean) => void;
   onResume?: () => void;
   onRetryShot?: (shotId: string) => void;
   onAcceptShot?: (shotId: string) => void;
 }) {
+  const [dryRun, setDryRun] = useState(false);
   const { project } = useWorkspace();
   const {
     panelOpen,
@@ -244,12 +245,13 @@ export default function SceneAgentPanel({
         <div className="border-t border-border-soft p-2">
           {planned.length > 0 && (
             <button
-              onClick={onGenerate}
+              onClick={() => onGenerate?.(dryRun)}
               disabled={!onGenerate || phase === "running"}
               className="w-full border border-foreground px-3 py-2 font-mono text-[11px] uppercase tracking-widest hover:bg-foreground hover:text-background disabled:opacity-40"
             >
               Generate {planned.length} start frame
               {planned.length > 1 ? "s" : ""}
+              {dryRun ? " (dry run)" : ""}
             </button>
           )}
           {planned.length > 0 && (
@@ -258,6 +260,16 @@ export default function SceneAgentPanel({
               {planned.length > 1 ? "s" : ""} + review passes · auto-fixes capped
               at {MAX_AUTO_FIXES} per shot
             </p>
+          )}
+          {planned.length > 0 && process.env.NODE_ENV === "development" && (
+            <label className="mt-1 flex items-center justify-center gap-1 font-mono text-[9px] uppercase tracking-wider text-muted">
+              <input
+                type="checkbox"
+                checked={dryRun}
+                onChange={(e) => setDryRun(e.target.checked)}
+              />
+              dry run — no fal credits, judge/fix loop only
+            </label>
           )}
           {resumable && (
             <button
