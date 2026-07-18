@@ -96,3 +96,6 @@ export interface SceneTranslation {
 }
 
 export type SceneMode = "blocks" | "outlines" | "traced" | "cutouts";
+
+/** Cutouts quality path: Fast = SAM only; Cinematic = atlas (+ plate when subjects). */
+export type SceneQuality = "fast" | "cinematic";

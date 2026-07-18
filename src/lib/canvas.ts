@@ -328,7 +328,18 @@ export async function saveBlobAsAsset(
 }
 
 /** Place an image on the canvas as a locked background for annotation. */
-export async function imageToCanvasBackground(editor: Editor, url: string) {
+export async function imageToCanvasBackground(
+  editor: Editor,
+  url: string,
+  opts?: {
+    /** Match cutout stage sizing (default: cap at stage, may letterbox). */
+    fitStage?: boolean;
+    imageW?: number;
+    imageH?: number;
+    source?: string;
+    locked?: boolean;
+  }
+) {
   const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -337,9 +348,14 @@ export async function imageToCanvasBackground(editor: Editor, url: string) {
     img.src = url;
   });
 
-  const scale = Math.min(STAGE_W / dims.w, STAGE_H / dims.h, 1);
-  const w = dims.w * scale;
-  const h = dims.h * scale;
+  const iw = opts?.imageW ?? dims.w;
+  const ih = opts?.imageH ?? dims.h;
+  // Align with cutoutsToCanvas scale so stickers register on the plate.
+  const scale = opts?.fitStage
+    ? Math.min(STAGE_W / iw, STAGE_H / ih)
+    : Math.min(STAGE_W / dims.w, STAGE_H / dims.h, 1);
+  const w = (opts?.fitStage ? iw : dims.w) * scale;
+  const h = (opts?.fitStage ? ih : dims.h) * scale;
 
   const assetId = AssetRecordType.createId();
   editor.createAssets([
@@ -366,10 +382,12 @@ export async function imageToCanvasBackground(editor: Editor, url: string) {
     x: 0,
     y: 0,
     props: { assetId, w, h },
-    meta: { source: "annotate-background" },
+    meta: { source: opts?.source ?? "annotate-background" },
   });
   editor.sendToBack([shapeId]);
-  editor.updateShapes([{ id: shapeId, type: "image", isLocked: true }]);
+  if (opts?.locked !== false) {
+    editor.updateShapes([{ id: shapeId, type: "image", isLocked: true }]);
+  }
   editor.zoomToFit({ animation: { duration: 200 } });
 }
 

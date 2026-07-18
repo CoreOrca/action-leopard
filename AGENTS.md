@@ -32,9 +32,9 @@ Next.js App Router app for **spatial control of AI-generated action video**: tra
 - `src/lib/prompts.ts` — ALL system prompts: director voice, screen-space directing rules, frame A→B delta strategy with proportion discipline (never "larger in frame"; anchor scale to environment), art-direction-images-are-style-only rules, scene translation (+ outline addendum, structural-elements rules), agent prompt. This file is the product's soul; edit deliberately.
 - `src/lib/generate.ts` — server: fal calls per model family → copy output to Blob (`copyToBlob`) → insert `assets` row.
 - `src/lib/canvas.ts` — client tldraw helpers: `sceneToCanvas` (blocks/outlines), `cutoutsToCanvas` (movable PNG pieces), scale legend, canvas→PNG export, `saveBlobAsAsset` (upload + asset row), `uploadBlobOnly` (upload only — cutout pieces), annotate-background, clear. tldraw v5 draw shapes need `compressLegacySegments` from `@tldraw/tlschema` (direct dep, pinned to tldraw's version).
-- `src/lib/segment.ts` — client mask processing: `traceMask` (binarize → Moore-neighbor contour → RDP simplify), `cutoutFromMask` (mask×reference → cropped transparent PNG). Threshold: alpha>127 && r+g+b>380.
-- API routes: `scene/translate` (grok vision → JSON blocking diagram + scale_anchors; mode blocks|outlines), `scene/segment` (per-box SAM 3.1 masks, cap 24, concurrency 4), `prompt/write` (modes image-a/image-b/video; cites scale anchors), `generate/image|video`, `agent` (SSE tool loop: translate_scene, generate_image, generate_video, list_assets), `assets/delete` (Blob del + row), `blob/upload`.
-- UI: `Workspace.tsx` orchestrates. `CanvasPanel` (scene-mode select cutouts/traced/outlines/blocks, ✦ Scene from image, Save shot, Clear), `PreviewPanel` (viewer + image palette, A/B frame marking, upload outside image, annotate, delete), `PromptBar` (Frame A/B/Video tabs → `projects.prompts` jsonb, input chips include/exclude), `VideoStrip` (click=preview, dblclick=modal player z-200), `SidePanel` (intent, reference, art direction text+thumbs, elements, agent launcher), `AgentModal` (SSE chat; applies translate_scene results to canvas), `TopBar` (hamburger: projects/assets/+new project; model selects; theme icon), `/studio/assets` page (all assets, filters, viewer, copy URL/download/delete).
+- `src/lib/segment.ts` — client mask processing: `traceMask`, `cutoutFromMask` (distance-field feather), `cutoutsFromAtlas` (color-key stickers), sticker/plate packaging helpers.
+- API routes: `scene/translate` (grok vision → JSON blocking diagram + scale_anchors; mode blocks|outlines), `scene/segment` (SAM 3.1 text+box+point, cap 24, concurrency 4), `scene/world` (plate = empty location via image edit; atlas = flat color instance map), `prompt/write` (modes image-a/image-b/video; cites scale anchors), `generate/image|video`, `agent` (SSE tool loop: translate_scene, generate_image, generate_video, list_assets), `assets/delete` (Blob del + row), `blob/upload`.
+- UI: `Workspace.tsx` orchestrates. `CanvasPanel` (scene-mode cutouts/traced/outlines/blocks; cutouts quality Cinematic|Fast; ✦ Scene from image, Save shot, Clear), `PreviewPanel` (viewer + image palette, A/B frame marking, upload outside image, annotate, delete), `PromptBar` (Frame A/B/Video tabs → `projects.prompts` jsonb, input chips include/exclude), `VideoStrip` (click=preview, dblclick=modal player z-200), `SidePanel` (intent, reference, art direction text+thumbs, elements, agent launcher), `AgentModal` (SSE chat; applies translate_scene results to canvas), `TopBar` (hamburger: projects/assets/+new project; model selects; theme icon), `/studio/assets` page (all assets, filters, viewer, copy URL/download/delete).
 - State: zustand (`src/lib/store.ts`). Theme: `.dark` class + localStorage `al-theme`; tldraw follows via MutationObserver; canvas wrapper is `isolate z-0` so modals stay above tldraw's internal z-indexes.
 - DB (all RLS `auth.uid() = user_id`): `projects` (intent, art_direction, reference_image_url, canvas_snapshot jsonb, prompts jsonb {image_a,image_b,video}, scene_meta jsonb {summary, scale_anchors}, image_model, video_model), `elements` (kind/name/notes/image_url), `assets` (type: image|video|canvas-shot|drawing|reference|art-direction; sort_order drives the sequence strip), `agent_messages` (unused so far).
 
@@ -44,19 +44,17 @@ Minimalist black/white, fine 1px borders, sharp corners (global CSS kills border
 
 ## Current state / known issues (as of 2026-07-18)
 
-1. **Segmentation improved (cutouts + traced) — needs live browser verification.**
-   - **Before:** box-only SAM 3.1 + strict white threshold (`r+g+b>380`) → patchy holes, ghost cars, ocean/road speckles as "cutouts". Screenshots in `assets/*_carchase.png`.
-   - **Now:**
-     - `/api/scene/segment`: text concept (from label/kind) + padded box + center point prompt; `return_multiple_masks` + score/IoU pick; still `apply_mask:false`.
-     - `segment.ts`: adaptive (Otsu) threshold, auto-invert, hole fill, morph close, drop tiny components; soft-edge cutout alpha via bilinear upsample of cleaned binary × soft mask strength.
-     - Cutouts mode: only **sticker** kinds (`vehicle|character|prop|set-dressing|other` / mobile) become photo pieces; sky/ground/nature/architecture/location render as **blocks behind** the stickers (spatial context, no ocean confetti).
-     - Outlines: prompt addendum tightened (no generic teardrops; car/road/building shape rules). Blocks path unchanged.
-   - **Revert:** `git revert` the segmentation commit, or reset to pre-fix `bb64f18`. Blocks-only baseline still at `6f1a2e5` (pre-segmentation entirely).
-   - **Still open:** live fal mask-format smoke test; optional procedural scene modes (ASCII / dots / game-tile blocking) not built; further sticker quality once user re-tests cutouts on the car-chase + Chongqing refs.
-2. Scene-mode default is `cutouts`; v1 baseline (blocks) preserved.
-3. Canvas-animation → guide-video recording unimplemented (tldraw renders DOM, not `<canvas>`; needs WebCodecs approach). Users can upload their own guide videos meanwhile.
-4. 360° shot-framing stage not started; `sam-3/3d-objects` fed by the cutout masks is the likely on-ramp; `SceneObject` keeps normalized coords for this. (See session notes / design chat for first-principles drone-camera ideas.)
-5. Seedance-2-fast multi-image refs (`@Image2`+) not yet wired to element images — natural extension of the input-chips row.
+1. **Segmentation v2 — cutouts Cinematic/Fast, empty plate, Scene Atlas.**
+   - SAM (`/api/scene/segment`): text + padded box + center point; multi-mask score/IoU.
+   - Client: distance-field feathered sticker edges; higher-res traces; architecture as stickers when discrete; continuous sky/ground/water as plate/blocks.
+   - **Plate:** subjects present → image-model empty location (`/api/scene/world` plate) as locked canvas backdrop.
+   - **Atlas (Cinematic):** flat color instance map → color-key stickers; SAM fills gaps. UI quality: Cinematic (default) | Fast.
+   - **Credits:** Cinematic + subjects ≈ 2 image gens + SAM. Fast ≈ SAM + optional plate. Blocks/outlines free of image gen.
+   - Revert via git; blocks-only baseline `6f1a2e5`. Still open: atlas fidelity, procedural modes, 360° drone.
+2. Scene-mode default `cutouts` + quality `cinematic`; blocks path unchanged.
+3. Canvas-animation → guide-video recording unimplemented (tldraw DOM, not `<canvas>`; WebCodecs later).
+4. 360° shot-framing not started; stickers + plate + atlas are the world package for a future freefly view.
+5. Seedance-2-fast multi-image refs (`@Image2`+) not yet wired to element images.
 6. Agent messages not persisted to `agent_messages` yet.
 
 ## Working preferences

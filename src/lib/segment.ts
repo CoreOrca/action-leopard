@@ -2,20 +2,35 @@
 
 /**
  * Client-side mask processing for segmentation-based scene modes.
- * - traceMask: binary mask image → simplified silhouette polygon
- * - cutoutFromMask: reference image × mask → cropped transparent PNG
+ * - traceMask: binary mask → simplified silhouette polygon
+ * - cutoutFromMask: reference × SAM mask → transparent PNG sticker
+ * - cutoutsFromAtlas: flat color map × reference → stickers by color key
  *
- * SAM 3.1 masks may be hard binary, soft grayscale, or alpha-channel.
- * We auto-detect format, clean holes/speckles, and produce soft-edge cutouts.
+ * SAM masks may be hard binary, soft grayscale, or alpha-channel.
+ * Cleanup + distance-field feather produce smooth sticker edges.
  */
 
 export interface TracedMask {
-  /** Polygon in mask-image pixel coords */
   polygon: [number, number][];
-  /** Tight bbox of the mask in pixel coords */
   bbox: { x: number; y: number; w: number; h: number };
   imageW: number;
   imageH: number;
+}
+
+export interface AtlasLegendEntry {
+  id: string;
+  label: string;
+  kind: string;
+  mobile: boolean;
+  /** RGB 0–255 assigned in the atlas generation prompt */
+  r: number;
+  g: number;
+  b: number;
+}
+
+export interface CutoutResult {
+  blob: Blob;
+  bbox: { x: number; y: number; w: number; h: number };
 }
 
 async function loadBitmap(url: string): Promise<ImageBitmap> {
@@ -24,7 +39,6 @@ async function loadBitmap(url: string): Promise<ImageBitmap> {
   return createImageBitmap(await res.blob());
 }
 
-/** Read mask pixels at optional downscale. Returns RGBA + dims. */
 function readMaskPixels(
   bitmap: ImageBitmap,
   maxDim: number
@@ -43,11 +57,11 @@ function readMaskPixels(
 /**
  * Convert a SAM mask image to a binary occupancy map.
  * Handles white-on-black, soft grayscale, and alpha masks; auto-inverts
- * if the "object" would cover most of the frame (common inverted output).
+ * if the "object" would cover most of the frame.
  */
 function maskToBinary(
   bitmap: ImageBitmap,
-  maxDim = 640
+  maxDim = 1280
 ): { data: Uint8Array; w: number; h: number; scale: number } {
   const { rgba, w, h, scale } = readMaskPixels(bitmap, maxDim);
   const n = w * h;
@@ -55,16 +69,13 @@ function maskToBinary(
 
   let alphaVar = 0;
   let alphaSum = 0;
-  for (let i = 0; i < n; i++) {
-    alphaSum += rgba[i * 4 + 3];
-  }
+  for (let i = 0; i < n; i++) alphaSum += rgba[i * 4 + 3];
   const alphaMean = alphaSum / n;
   for (let i = 0; i < n; i++) {
     const a = rgba[i * 4 + 3];
     alphaVar += (a - alphaMean) ** 2;
   }
   alphaVar /= n;
-  // Prefer alpha when it actually varies (true alpha mask / cutout).
   const useAlpha = alphaVar > 200;
 
   for (let i = 0; i < n; i++) {
@@ -75,12 +86,10 @@ function maskToBinary(
     if (useAlpha) {
       strength[i] = a;
     } else {
-      // Grayscale / RGB mask: luminance. Fully transparent → off.
       strength[i] = a < 16 ? 0 : 0.299 * r + 0.587 * g + 0.114 * b;
     }
   }
 
-  // Otsu-like threshold on the strength histogram (256 bins).
   const hist = new Uint32Array(256);
   for (let i = 0; i < n; i++) {
     hist[Math.min(255, Math.max(0, Math.round(strength[i])))]++;
@@ -110,7 +119,6 @@ function maskToBinary(
         threshold = t;
       }
     }
-    // Floor: soft masks often peak mid-gray; don't go below ~40.
     threshold = Math.max(40, Math.min(200, threshold));
   }
 
@@ -122,34 +130,26 @@ function maskToBinary(
     onCount += on;
   }
 
-  // If "object" is most of the frame, the mask is likely inverted.
   if (onCount > n * 0.55) {
     for (let i = 0; i < n; i++) bin[i] = bin[i] ? 0 : 1;
     onCount = n - onCount;
   }
 
-  // Drop empty / near-empty masks early.
-  if (onCount < 16) {
-    return { data: bin, w, h, scale };
-  }
+  if (onCount < 16) return { data: bin, w, h, scale };
 
   cleanMask(bin, w, h);
   return { data: bin, w, h, scale };
 }
 
-/** Hole fill + morphological close + drop tiny components. */
 function cleanMask(bin: Uint8Array, w: number, h: number) {
   fillHoles(bin, w, h);
   morphClose(bin, w, h, 1);
-  keepLargestComponents(bin, w, h, 0.01);
+  keepLargestComponents(bin, w, h, 0.008);
 }
 
-/**
- * Flood-fill background from image edges; any remaining 0s are holes → fill.
- */
 function fillHoles(bin: Uint8Array, w: number, h: number) {
   const n = w * h;
-  const exterior = new Uint8Array(n); // 1 = reachable background from edge
+  const exterior = new Uint8Array(n);
   const stack: number[] = [];
 
   const tryPush = (x: number, y: number) => {
@@ -180,12 +180,10 @@ function fillHoles(bin: Uint8Array, w: number, h: number) {
   }
 
   for (let i = 0; i < n; i++) {
-    // Interior background (not exterior, not object) = hole
     if (!bin[i] && !exterior[i]) bin[i] = 1;
   }
 }
 
-/** Dilate then erode with a (2r+1) square kernel to close small gaps. */
 function morphClose(bin: Uint8Array, w: number, h: number, radius: number) {
   const n = w * h;
   const dil = new Uint8Array(n);
@@ -223,10 +221,6 @@ function morphClose(bin: Uint8Array, w: number, h: number, radius: number) {
   }
 }
 
-/**
- * Keep connected components whose area is ≥ minFrac of total object area
- * (or the single largest if everything is tiny). Drops speckles.
- */
 function keepLargestComponents(
   bin: Uint8Array,
   w: number,
@@ -241,7 +235,6 @@ function keepLargestComponents(
 
   for (let i = 0; i < n; i++) {
     if (!bin[i] || labels[i] >= 0) continue;
-    // BFS flood
     const q = [i];
     labels[i] = label;
     let area = 0;
@@ -254,7 +247,6 @@ function keepLargestComponents(
       for (const nb of neighbors) {
         if (nb < 0 || nb >= n) continue;
         const nx = nb % w;
-        // Prevent wrap on horizontal neighbors
         if (Math.abs(nx - x) + Math.abs(((nb / w) | 0) - y) !== 1) continue;
         if (bin[nb] && labels[nb] < 0) {
           labels[nb] = label;
@@ -271,7 +263,6 @@ function keepLargestComponents(
   const minArea = Math.max(16, total * minFrac);
   let keep = areas.map((a) => a >= minArea);
   if (!keep.some(Boolean)) {
-    // Keep only the largest
     const maxIdx = areas.indexOf(Math.max(...areas));
     keep = areas.map((_, i) => i === maxIdx);
   }
@@ -281,144 +272,106 @@ function keepLargestComponents(
   }
 }
 
-/** Moore-neighbor boundary trace of the largest connected mass. */
-function traceBoundary(
+/**
+ * Chamfer distance from each object pixel to the nearest background.
+ * Used for smoothstep edge feathering (smoother than bilinear binary).
+ */
+function distanceToBackground(
   bin: Uint8Array,
   w: number,
   h: number
-): [number, number][] {
-  const at = (x: number, y: number) =>
-    x >= 0 && y >= 0 && x < w && y < h ? bin[y * w + x] : 0;
+): Float32Array {
+  const n = w * h;
+  const dist = new Float32Array(n);
+  const INF = 1e6;
+  for (let i = 0; i < n; i++) dist[i] = bin[i] ? INF : 0;
 
-  // Prefer starting on the largest component's topmost-left pixel
-  const areas = new Map<string, number>();
-  // Just scan for first object pixel (cleanMask already kept largest comps)
-  let sx = -1;
-  let sy = -1;
-  outer: for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (at(x, y)) {
-        sx = x;
-        sy = y;
-        break outer;
-      }
-    }
-  }
-  if (sx < 0) return [];
-  void areas;
-
-  const dirs = [
-    [1, 0],
-    [1, 1],
-    [0, 1],
-    [-1, 1],
-    [-1, 0],
-    [-1, -1],
-    [0, -1],
-    [1, -1],
-  ];
-  const contour: [number, number][] = [];
-  let cx = sx;
-  let cy = sy;
-  let dir = 6; // came from below
-  const maxSteps = w * h * 4;
-
-  for (let step = 0; step < maxSteps; step++) {
-    contour.push([cx, cy]);
-    let found = false;
-    for (let i = 0; i < 8; i++) {
-      const d = (dir + 6 + i) % 8; // start looking backwards-left
-      const nx = cx + dirs[d][0];
-      const ny = cy + dirs[d][1];
-      if (at(nx, ny)) {
-        cx = nx;
-        cy = ny;
-        dir = d;
-        found = true;
-        break;
-      }
-    }
-    if (!found) break; // isolated pixel
-    if (cx === sx && cy === sy && contour.length > 2) break;
-  }
-  return contour;
-}
-
-/** Ramer-Douglas-Peucker simplification. */
-function simplify(
-  points: [number, number][],
-  epsilon: number
-): [number, number][] {
-  if (points.length < 3) return points;
-  const dmax = { d: 0, i: 0 };
-  const [x1, y1] = points[0];
-  const [x2, y2] = points[points.length - 1];
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const len = Math.hypot(dx, dy) || 1;
-  for (let i = 1; i < points.length - 1; i++) {
-    const d =
-      Math.abs(dy * points[i][0] - dx * points[i][1] + x2 * y1 - y2 * x1) / len;
-    if (d > dmax.d) {
-      dmax.d = d;
-      dmax.i = i;
-    }
-  }
-  if (dmax.d > epsilon) {
-    const left = simplify(points.slice(0, dmax.i + 1), epsilon);
-    const right = simplify(points.slice(dmax.i), epsilon);
-    return [...left.slice(0, -1), ...right];
-  }
-  return [points[0], points[points.length - 1]];
-}
-
-export async function traceMask(maskUrl: string): Promise<TracedMask | null> {
-  const bitmap = await loadBitmap(maskUrl);
-  const { data, w, h, scale } = maskToBinary(bitmap);
-
-  let minX = w;
-  let minY = h;
-  let maxX = 0;
-  let maxY = 0;
-  let count = 0;
+  // Forward
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      if (data[y * w + x]) {
-        count++;
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-      }
+      const i = y * w + x;
+      if (!bin[i]) continue;
+      if (x > 0) dist[i] = Math.min(dist[i], dist[i - 1] + 1);
+      if (y > 0) dist[i] = Math.min(dist[i], dist[i - w] + 1);
+      if (x > 0 && y > 0) dist[i] = Math.min(dist[i], dist[i - w - 1] + 1.414);
+      if (x < w - 1 && y > 0)
+        dist[i] = Math.min(dist[i], dist[i - w + 1] + 1.414);
     }
   }
-  if (count < 16) return null;
+  // Backward
+  for (let y = h - 1; y >= 0; y--) {
+    for (let x = w - 1; x >= 0; x--) {
+      const i = y * w + x;
+      if (!bin[i]) continue;
+      if (x < w - 1) dist[i] = Math.min(dist[i], dist[i + 1] + 1);
+      if (y < h - 1) dist[i] = Math.min(dist[i], dist[i + w] + 1);
+      if (x < w - 1 && y < h - 1)
+        dist[i] = Math.min(dist[i], dist[i + w + 1] + 1.414);
+      if (x > 0 && y < h - 1)
+        dist[i] = Math.min(dist[i], dist[i + w - 1] + 1.414);
+    }
+  }
+  return dist;
+}
 
-  const contour = traceBoundary(data, w, h);
-  if (contour.length < 8) return null;
-  const eps = Math.max(1.5, Math.max(maxX - minX, maxY - minY) / 80);
-  const poly = simplify(contour, eps).map(
-    ([x, y]) => [x / scale, y / scale] as [number, number]
-  );
-
-  return {
-    polygon: poly,
-    bbox: {
-      x: minX / scale,
-      y: minY / scale,
-      w: (maxX - minX + 1) / scale,
-      h: (maxY - minY + 1) / scale,
-    },
-    imageW: bitmap.width,
-    imageH: bitmap.height,
-  };
+/** Smoothstep 0..1 */
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0 || 1)));
+  return t * t * (3 - 2 * t);
 }
 
 /**
- * Soft mask strength 0..1 at full reference resolution.
- * Same format detection as maskToBinary, but preserves edge falloff for
- * anti-aliased cutouts.
+ * Binary → soft alpha via distance field. Interior solid, ~featherPx soft edge.
  */
+function binaryToFeatheredAlpha(
+  bin: Uint8Array,
+  w: number,
+  h: number,
+  featherPx: number
+): Float32Array {
+  const dist = distanceToBackground(bin, w, h);
+  const alpha = new Float32Array(w * h);
+  const f = Math.max(1.5, featherPx);
+  for (let i = 0; i < w * h; i++) {
+    if (!bin[i]) {
+      alpha[i] = 0;
+      continue;
+    }
+    // Ramp from 0 at boundary to 1 by feather distance inward
+    alpha[i] = smoothstep(0.5, f, dist[i]);
+  }
+  return alpha;
+}
+
+function sampleAlpha(
+  alpha: Float32Array,
+  aw: number,
+  ah: number,
+  x: number,
+  y: number,
+  fullW: number,
+  fullH: number
+): number {
+  const fx = ((x + 0.5) / fullW) * aw - 0.5;
+  const fy = ((y + 0.5) / fullH) * ah - 0.5;
+  const x0 = Math.floor(fx);
+  const y0 = Math.floor(fy);
+  const x1 = x0 + 1;
+  const y1 = y0 + 1;
+  const tx = fx - x0;
+  const ty = fy - y0;
+  const at = (ix: number, iy: number) => {
+    if (ix < 0 || iy < 0 || ix >= aw || iy >= ah) return 0;
+    return alpha[iy * aw + ix];
+  };
+  return (
+    at(x0, y0) * (1 - tx) * (1 - ty) +
+    at(x1, y0) * tx * (1 - ty) +
+    at(x0, y1) * (1 - tx) * ty +
+    at(x1, y1) * tx * ty
+  );
+}
+
 function maskStrengthFull(
   mask: ImageBitmap,
   w: number,
@@ -456,67 +409,176 @@ function maskStrengthFull(
     }
   }
 
-  // Mean strength — invert if the mask is mostly "on"
   let mean = 0;
   for (let i = 0; i < n; i++) mean += strength[i];
   mean /= n;
   if (mean > 0.55) {
     for (let i = 0; i < n; i++) strength[i] = 1 - strength[i];
   }
-
   return strength;
 }
 
-/**
- * Bilinear sample of a binary mask (0/1) as a float alpha 0..1.
- * Gives smooth sticker edges when the cleanup grid is coarser than the photo.
- */
-function sampleBinaryAlpha(
+function traceBoundary(
   bin: Uint8Array,
-  bw: number,
-  bh: number,
-  x: number,
-  y: number,
-  fullW: number,
-  fullH: number
-): number {
-  const fx = ((x + 0.5) / fullW) * bw - 0.5;
-  const fy = ((y + 0.5) / fullH) * bh - 0.5;
-  const x0 = Math.floor(fx);
-  const y0 = Math.floor(fy);
-  const x1 = x0 + 1;
-  const y1 = y0 + 1;
-  const tx = fx - x0;
-  const ty = fy - y0;
-  const at = (ix: number, iy: number) => {
-    if (ix < 0 || iy < 0 || ix >= bw || iy >= bh) return 0;
-    return bin[iy * bw + ix];
-  };
-  const v00 = at(x0, y0);
-  const v10 = at(x1, y0);
-  const v01 = at(x0, y1);
-  const v11 = at(x1, y1);
-  return (
-    v00 * (1 - tx) * (1 - ty) +
-    v10 * tx * (1 - ty) +
-    v01 * (1 - tx) * ty +
-    v11 * tx * ty
+  w: number,
+  h: number
+): [number, number][] {
+  const at = (x: number, y: number) =>
+    x >= 0 && y >= 0 && x < w && y < h ? bin[y * w + x] : 0;
+
+  let sx = -1;
+  let sy = -1;
+  outer: for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (at(x, y)) {
+        sx = x;
+        sy = y;
+        break outer;
+      }
+    }
+  }
+  if (sx < 0) return [];
+
+  const dirs = [
+    [1, 0],
+    [1, 1],
+    [0, 1],
+    [-1, 1],
+    [-1, 0],
+    [-1, -1],
+    [0, -1],
+    [1, -1],
+  ];
+  const contour: [number, number][] = [];
+  let cx = sx;
+  let cy = sy;
+  let dir = 6;
+  const maxSteps = w * h * 4;
+
+  for (let step = 0; step < maxSteps; step++) {
+    contour.push([cx, cy]);
+    let found = false;
+    for (let i = 0; i < 8; i++) {
+      const d = (dir + 6 + i) % 8;
+      const nx = cx + dirs[d][0];
+      const ny = cy + dirs[d][1];
+      if (at(nx, ny)) {
+        cx = nx;
+        cy = ny;
+        dir = d;
+        found = true;
+        break;
+      }
+    }
+    if (!found) break;
+    if (cx === sx && cy === sy && contour.length > 2) break;
+  }
+  return contour;
+}
+
+function simplify(
+  points: [number, number][],
+  epsilon: number
+): [number, number][] {
+  if (points.length < 3) return points;
+  const dmax = { d: 0, i: 0 };
+  const [x1, y1] = points[0];
+  const [x2, y2] = points[points.length - 1];
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1;
+  for (let i = 1; i < points.length - 1; i++) {
+    const d =
+      Math.abs(dy * points[i][0] - dx * points[i][1] + x2 * y1 - y2 * x1) / len;
+    if (d > dmax.d) {
+      dmax.d = d;
+      dmax.i = i;
+    }
+  }
+  if (dmax.d > epsilon) {
+    const left = simplify(points.slice(0, dmax.i + 1), epsilon);
+    const right = simplify(points.slice(dmax.i), epsilon);
+    return [...left.slice(0, -1), ...right];
+  }
+  return [points[0], points[points.length - 1]];
+}
+
+/** Mild Chaikin corner-cut for smoother silhouettes without losing extent. */
+function chaikin(
+  points: [number, number][],
+  iterations = 1
+): [number, number][] {
+  let pts = points;
+  for (let iter = 0; iter < iterations; iter++) {
+    if (pts.length < 3) return pts;
+    const next: [number, number][] = [];
+    const n = pts.length;
+    // Open chain treatment: keep ends, cut middles (closed loop assumed)
+    for (let i = 0; i < n; i++) {
+      const [x0, y0] = pts[i];
+      const [x1, y1] = pts[(i + 1) % n];
+      next.push([0.75 * x0 + 0.25 * x1, 0.75 * y0 + 0.25 * y1]);
+      next.push([0.25 * x0 + 0.75 * x1, 0.25 * y0 + 0.75 * y1]);
+    }
+    pts = next;
+  }
+  return pts;
+}
+
+export async function traceMask(maskUrl: string): Promise<TracedMask | null> {
+  const bitmap = await loadBitmap(maskUrl);
+  // Higher res for tighter silhouettes
+  const { data, w, h, scale } = maskToBinary(bitmap, 1280);
+
+  let minX = w;
+  let minY = h;
+  let maxX = 0;
+  let maxY = 0;
+  let count = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (data[y * w + x]) {
+        count++;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (count < 16) return null;
+
+  const contour = traceBoundary(data, w, h);
+  if (contour.length < 8) return null;
+  // Less aggressive RDP → more precise traces
+  const eps = Math.max(0.75, Math.max(maxX - minX, maxY - minY) / 140);
+  let poly = simplify(contour, eps);
+  if (poly.length >= 6) poly = chaikin(poly, 1);
+  const mapped = poly.map(
+    ([x, y]) => [x / scale, y / scale] as [number, number]
   );
+
+  return {
+    polygon: mapped,
+    bbox: {
+      x: minX / scale,
+      y: minY / scale,
+      w: (maxX - minX + 1) / scale,
+      h: (maxY - minY + 1) / scale,
+    },
+    imageW: bitmap.width,
+    imageH: bitmap.height,
+  };
 }
 
 /**
- * Composite the reference image with a mask into a tightly-cropped
- * transparent PNG cutout. Returns the blob plus the crop bbox in
- * reference-image pixel coords.
- *
- * Cleanup (hole fill, morph close, drop speckles) runs on a downscaled
- * binary mask; alpha is the bilinear upsample of that binary blended
- * with the original soft mask strength for natural sticker edges.
+ * Composite reference × mask → tightly-cropped transparent PNG.
+ * Distance-field feather at high cleanup res for smooth sticker edges.
  */
 export async function cutoutFromMask(
   referenceUrl: string,
   maskUrl: string
-): Promise<{ blob: Blob; bbox: { x: number; y: number; w: number; h: number } } | null> {
+): Promise<CutoutResult | null> {
   const [ref, mask] = await Promise.all([
     loadBitmap(referenceUrl),
     loadBitmap(maskUrl),
@@ -525,7 +587,10 @@ export async function cutoutFromMask(
   const w = ref.width;
   const h = ref.height;
 
-  const { data: bin, w: bw, h: bh } = maskToBinary(mask, 640);
+  const { data: bin, w: bw, h: bh } = maskToBinary(mask, 1280);
+  // Feather ~2.5px at cleanup res, scales visually with image
+  const feather = Math.max(2, Math.round(Math.min(bw, bh) * 0.004));
+  const feathered = binaryToFeatheredAlpha(bin, bw, bh, feather);
   const soft = maskStrengthFull(mask, w, h);
 
   const canvas = document.createElement("canvas");
@@ -544,10 +609,13 @@ export async function cutoutFromMask(
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
-      const cleaned = sampleBinaryAlpha(bin, bw, bh, x, y, w, h);
-      // Gate with cleaned occupancy; refine edge with original soft strength.
-      const alphaF = cleaned * Math.max(soft[i], cleaned > 0.5 ? 0.9 : 0);
-      if (alphaF < 0.06) {
+      const featherA = sampleAlpha(feathered, bw, bh, x, y, w, h);
+      // Prefer distance-field alpha; lift interior with soft mask slightly
+      const alphaF =
+        featherA > 0.5
+          ? Math.max(featherA, Math.min(1, soft[i] * 0.15 + featherA * 0.85))
+          : featherA;
+      if (alphaF < 0.04) {
         img.data[i * 4 + 3] = 0;
         continue;
       }
@@ -563,7 +631,6 @@ export async function cutoutFromMask(
 
   if (count < 16) return null;
 
-  // Pad crop by 2px so soft edges aren't clipped
   minX = Math.max(0, minX - 2);
   minY = Math.max(0, minY - 2);
   maxX = Math.min(w - 1, maxX + 2);
@@ -585,35 +652,257 @@ export async function cutoutFromMask(
 }
 
 /**
- * Kinds that become movable photo-stickers in cutouts mode.
- * Amorphous backgrounds stay as blocks behind the stickers.
+ * Extract stickers from a flat-color Scene Atlas + the original photo.
+ * Each legend color keys a region; matched pixels pull photo content.
  */
-export const STICKER_KINDS = new Set([
-  "vehicle",
-  "character",
-  "prop",
-  "set-dressing",
-  "other",
-]);
+export async function cutoutsFromAtlas(
+  referenceUrl: string,
+  atlasUrl: string,
+  legend: AtlasLegendEntry[],
+  colorTolerance = 48
+): Promise<
+  {
+    id: string;
+    label: string;
+    kind: string;
+    mobile: boolean;
+    blob: Blob;
+    bbox: { x: number; y: number; w: number; h: number };
+  }[]
+> {
+  const [ref, atlas] = await Promise.all([
+    loadBitmap(referenceUrl),
+    loadBitmap(atlasUrl),
+  ]);
+  const w = ref.width;
+  const h = ref.height;
 
-/** Kinds always treated as backdrop (never photo-cutouts). */
-export const BACKDROP_KINDS = new Set([
-  "sky",
-  "ground",
-  "nature",
-  "architecture",
-  "location",
-]);
+  const aCanvas = document.createElement("canvas");
+  aCanvas.width = w;
+  aCanvas.height = h;
+  const aCtx = aCanvas.getContext("2d", { willReadFrequently: true })!;
+  aCtx.drawImage(atlas, 0, 0, w, h);
+  const atlasData = aCtx.getImageData(0, 0, w, h).data;
 
+  const rCanvas = document.createElement("canvas");
+  rCanvas.width = w;
+  rCanvas.height = h;
+  const rCtx = rCanvas.getContext("2d", { willReadFrequently: true })!;
+  rCtx.drawImage(ref, 0, 0, w, h);
+
+  const results: {
+    id: string;
+    label: string;
+    kind: string;
+    mobile: boolean;
+    blob: Blob;
+    bbox: { x: number; y: number; w: number; h: number };
+  }[] = [];
+
+  const tol2 = colorTolerance * colorTolerance;
+
+  for (const entry of legend) {
+    const bin = new Uint8Array(w * h);
+    let count = 0;
+    for (let i = 0; i < w * h; i++) {
+      const dr = atlasData[i * 4] - entry.r;
+      const dg = atlasData[i * 4 + 1] - entry.g;
+      const db = atlasData[i * 4 + 2] - entry.b;
+      if (dr * dr + dg * dg + db * db <= tol2) {
+        bin[i] = 1;
+        count++;
+      }
+    }
+    if (count < 64) continue;
+
+    cleanMask(bin, w, h);
+    // Recount after cleanup
+    count = 0;
+    for (let i = 0; i < w * h; i++) if (bin[i]) count++;
+    if (count < 64) continue;
+
+    const feather = Math.max(2, Math.round(Math.min(w, h) * 0.0025));
+    const alphaMap = binaryToFeatheredAlpha(bin, w, h, feather);
+
+    rCtx.drawImage(ref, 0, 0, w, h);
+    const img = rCtx.getImageData(0, 0, w, h);
+
+    let minX = w;
+    let minY = h;
+    let maxX = 0;
+    let maxY = 0;
+    let on = 0;
+    for (let i = 0; i < w * h; i++) {
+      const a = alphaMap[i];
+      if (a < 0.04) {
+        img.data[i * 4 + 3] = 0;
+        continue;
+      }
+      img.data[i * 4 + 3] = Math.min(
+        img.data[i * 4 + 3],
+        Math.round(a * 255)
+      );
+      on++;
+      const x = i % w;
+      const y = (i / w) | 0;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+    if (on < 64) continue;
+
+    minX = Math.max(0, minX - 2);
+    minY = Math.max(0, minY - 2);
+    maxX = Math.min(w - 1, maxX + 2);
+    maxY = Math.min(h - 1, maxY + 2);
+
+    rCtx.putImageData(img, 0, 0);
+    const cw = maxX - minX + 1;
+    const ch = maxY - minY + 1;
+    const crop = document.createElement("canvas");
+    crop.width = cw;
+    crop.height = ch;
+    crop.getContext("2d")!.drawImage(rCanvas, minX, minY, cw, ch, 0, 0, cw, ch);
+    const blob = await new Promise<Blob | null>((resolve) =>
+      crop.toBlob(resolve, "image/png")
+    );
+    if (!blob) continue;
+    results.push({
+      id: entry.id,
+      label: entry.label,
+      kind: entry.kind,
+      mobile: entry.mobile,
+      blob,
+      bbox: { x: minX, y: minY, w: cw, h: ch },
+    });
+  }
+
+  return results;
+}
+
+/** Fixed high-contrast palette for Scene Atlas color keys (max ~24 objects). */
+export const ATLAS_PALETTE: [number, number, number][] = [
+  [231, 76, 60],
+  [52, 152, 219],
+  [46, 204, 113],
+  [155, 89, 182],
+  [241, 196, 15],
+  [230, 126, 34],
+  [26, 188, 156],
+  [52, 73, 94],
+  [192, 57, 43],
+  [41, 128, 185],
+  [39, 174, 96],
+  [142, 68, 173],
+  [243, 156, 18],
+  [211, 84, 0],
+  [22, 160, 133],
+  [127, 140, 141],
+  [44, 62, 80],
+  [22, 160, 133],
+  [189, 195, 199],
+  [149, 165, 166],
+  [250, 128, 114],
+  [100, 149, 237],
+  [60, 179, 113],
+  [255, 105, 180],
+];
+
+export function assignAtlasColors(
+  objects: { id: string; label: string; kind: string; mobile: boolean }[]
+): AtlasLegendEntry[] {
+  return objects.map((o, i) => {
+    const [r, g, b] = ATLAS_PALETTE[i % ATLAS_PALETTE.length];
+    return { id: o.id, label: o.label, kind: o.kind, mobile: o.mobile, r, g, b };
+  });
+}
+
+// ── Scene packaging: what becomes a sticker vs continuous stage ──────────
+
+/** Always continuous environment — never photo-stickers. */
+export const CONTINUOUS_KINDS = new Set(["sky", "ground"]);
+
+/**
+ * True for discrete playable pieces: vehicles, people, props, and
+ * structural architecture (towers, skybridges, walkways). Continuous
+ * sky / ground / large water / far skyline stay as plate or blocks.
+ */
 export function isStickerObject(obj: {
   kind: string;
   mobile: boolean;
   w: number;
   h: number;
+  label?: string;
 }): boolean {
-  if (BACKDROP_KINDS.has(obj.kind)) return false;
-  if (STICKER_KINDS.has(obj.kind)) return true;
-  // Unknown kinds: stickers if mobile or reasonably small (not a full-frame slab)
+  const kind = obj.kind;
+  const area = obj.w * obj.h;
+  const label = (obj.label ?? "").toLowerCase();
+
+  if (kind === "sky") return false;
+  if (kind === "ground" && area > 0.12) return false;
+
+  // Continuous environment by label (even if mis-kinded)
+  if (
+    /^(overcast\s+)?sky\b|^ocean\b|^sea\b|^river\b|^water\b|^horizon\b/.test(
+      label
+    )
+  ) {
+    return false;
+  }
+  if (
+    area > 0.18 &&
+    /(skyline|far[- ]?bank|distant\s+(city|coast|hills)|wide\s+river)/.test(
+      label
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    kind === "vehicle" ||
+    kind === "character" ||
+    kind === "prop" ||
+    kind === "set-dressing"
+  ) {
+    return true;
+  }
   if (obj.mobile) return true;
-  return obj.w * obj.h < 0.35;
+
+  // Architecture / location: discrete structures are stickers (Chongqing towers,
+  // skybridges, walkways). Full-frame slabs stay backdrop.
+  if (kind === "architecture" || kind === "location") {
+    return area < 0.55;
+  }
+
+  // Nature: small rocks/trees yes; large hills/embankments no
+  if (kind === "nature") {
+    return area < 0.22;
+  }
+
+  if (kind === "other") return area < 0.4;
+  return area < 0.35;
+}
+
+/** Scene has cars/people/props worth removing for an empty plate. */
+export function hasMobileSubjects(
+  objects: { kind: string; mobile: boolean }[]
+): boolean {
+  return objects.some(
+    (o) =>
+      o.mobile ||
+      o.kind === "vehicle" ||
+      o.kind === "character" ||
+      o.kind === "prop"
+  );
+}
+
+/** Location-heavy (many structures) → prefer cinematic atlas. */
+export function isLocationHeavy(
+  objects: { kind: string; w: number; h: number }[]
+): boolean {
+  const arch = objects.filter(
+    (o) => o.kind === "architecture" || o.kind === "location"
+  );
+  return arch.length >= 3 || arch.some((o) => o.w * o.h > 0.15);
 }

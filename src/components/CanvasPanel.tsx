@@ -9,17 +9,27 @@ import {
   clearCanvas,
   cutoutsToCanvas,
   exportCanvasPng,
+  imageToCanvasBackground,
   saveBlobAsAsset,
   sceneToCanvas,
   uploadBlobOnly,
   type CutoutPiece,
 } from "@/lib/canvas";
 import {
+  assignAtlasColors,
   cutoutFromMask,
+  cutoutsFromAtlas,
+  hasMobileSubjects,
   isStickerObject,
   traceMask,
 } from "@/lib/segment";
-import type { SceneMode, SceneObject, SceneTranslation } from "@/lib/types";
+import type {
+  SceneMode,
+  SceneObject,
+  SceneQuality,
+  SceneTranslation,
+} from "@/lib/types";
+import type { Asset } from "@/lib/types";
 
 const Tldraw = dynamic(async () => (await import("tldraw")).Tldraw, {
   ssr: false,
@@ -41,6 +51,7 @@ export default function CanvasPanel({
   const editorRef = useRef<Editor | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sceneMode, setSceneMode] = useState<SceneMode>("cutouts");
+  const [sceneQuality, setSceneQuality] = useState<SceneQuality>("cinematic");
 
   const handleMount = useCallback(
     (editor: Editor) => {
@@ -54,7 +65,6 @@ export default function CanvasPanel({
             : "light",
         });
       syncTheme();
-      // Follow the app's theme toggle live.
       const observer = new MutationObserver(syncTheme);
       observer.observe(document.documentElement, {
         attributes: true,
@@ -69,8 +79,9 @@ export default function CanvasPanel({
           // corrupted snapshot; start clean
         }
       }
-      // The snapshot has no camera state — frame the content on open.
-      requestAnimationFrame(() => editor.zoomToFit({ animation: { duration: 0 } }));
+      requestAnimationFrame(() =>
+        editor.zoomToFit({ animation: { duration: 0 } })
+      );
 
       editor.store.listen(
         () => {
@@ -86,6 +97,18 @@ export default function CanvasPanel({
     [onEditorReady, onSnapshotChange]
   );
 
+  async function loadImageDims(
+    url: string
+  ): Promise<{ w: number; h: number }> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () =>
+        resolve({ w: img.naturalWidth, h: img.naturalHeight });
+      img.onerror = () => reject(new Error("Could not load reference image"));
+      img.src = url;
+    });
+  }
+
   async function translateScene() {
     const editor = editorRef.current;
     const ref = useWorkspace.getState().project?.reference_image_url;
@@ -95,7 +118,6 @@ export default function CanvasPanel({
     }
     setBusy("Reading the location…");
     try {
-      // Segmentation modes use grok's bounding boxes as SAM2 prompts.
       const translateMode = sceneMode === "outlines" ? "outlines" : "blocks";
       const res = await fetch("/api/scene/translate", {
         method: "POST",
@@ -111,12 +133,11 @@ export default function CanvasPanel({
       const scene = data.scene as SceneTranslation;
 
       if (sceneMode === "traced" || sceneMode === "cutouts") {
-        await buildSegmentedScene(editor, ref, scene, sceneMode);
+        await buildSegmentedScene(editor, ref, scene, sceneMode, sceneQuality);
       } else {
         await sceneToCanvas(editor, scene);
       }
 
-      // Persist scale anchors so the prompt writer can cite them.
       const scene_meta = {
         summary: scene.summary,
         scale_anchors: scene.scale_anchors ?? [],
@@ -130,37 +151,35 @@ export default function CanvasPanel({
     }
   }
 
-  async function buildSegmentedScene(
-    editor: Editor,
+  async function requestWorld(
+    mode: "plate" | "atlas",
+    imageUrl: string,
+    extra: Record<string, unknown>
+  ): Promise<{ url: string | null; assets?: Asset[] }> {
+    const modelId =
+      useWorkspace.getState().project?.image_model ?? "nano-banana-pro";
+    const res = await fetch("/api/scene/world", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode,
+        imageUrl,
+        projectId,
+        modelId,
+        ...extra,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? `${mode} generation failed`);
+    if (data.assets?.length) addAssets(data.assets as Asset[]);
+    return { url: data.url ?? null, assets: data.assets };
+  }
+
+  async function segmentWithSam(
     referenceUrl: string,
-    scene: SceneTranslation,
-    mode: "traced" | "cutouts"
-  ) {
-    const dims = await new Promise<{ w: number; h: number }>(
-      (resolve, reject) => {
-        const img = new Image();
-        img.onload = () =>
-          resolve({ w: img.naturalWidth, h: img.naturalHeight });
-        img.onerror = () => reject(new Error("Could not load reference image"));
-        img.src = referenceUrl;
-      }
-    );
-
-    // Traced: segment everything except pure sky.
-    // Cutouts: only "sticker" objects (cars, people, props) get photo pieces;
-    // amorphous sky/ground/terrain stay as movable blocks behind them.
-    const targets =
-      mode === "cutouts"
-        ? scene.objects.filter((o) => isStickerObject(o))
-        : scene.objects.filter((o) => o.kind !== "sky");
-
-    if (!targets.length && mode === "cutouts") {
-      // Nothing sticker-worthy — fall back to blocks for the whole scene.
-      await sceneToCanvas(editor, scene);
-      return;
-    }
-
-    setBusy(`Segmenting ${targets.length} objects…`);
+    targets: SceneObject[],
+    dims: { w: number; h: number }
+  ): Promise<Map<string, string | null>> {
     const segRes = await fetch("/api/scene/segment", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -181,14 +200,37 @@ export default function CanvasPanel({
     });
     const segData = await segRes.json();
     if (!segRes.ok) throw new Error(segData.error ?? "segmentation failed");
-    const maskByid = new Map<string, string | null>(
+    return new Map(
       (segData.masks as { id: string; maskUrl: string | null }[]).map((m) => [
         m.id,
         m.maskUrl,
       ])
     );
+  }
 
+  async function buildSegmentedScene(
+    editor: Editor,
+    referenceUrl: string,
+    scene: SceneTranslation,
+    mode: "traced" | "cutouts",
+    quality: SceneQuality
+  ) {
+    const dims = await loadImageDims(referenceUrl);
+
+    const targets =
+      mode === "cutouts"
+        ? scene.objects.filter((o) => isStickerObject(o))
+        : scene.objects.filter((o) => o.kind !== "sky");
+
+    if (!targets.length && mode === "cutouts") {
+      await sceneToCanvas(editor, scene);
+      return;
+    }
+
+    // ── Traced path (SAM + improved contour) ───────────────────────────
     if (mode === "traced") {
+      setBusy(`Segmenting ${targets.length} objects…`);
+      const maskByid = await segmentWithSam(referenceUrl, targets, dims);
       setBusy("Tracing silhouettes…");
       const withOutlines: SceneObject[] = [];
       for (const obj of targets) {
@@ -213,10 +255,9 @@ export default function CanvasPanel({
                     ]
                 ),
               }
-            : obj // fall back to its block
+            : obj
         );
       }
-      // Sky (and anything not in targets) kept as plain blocks.
       const rest = scene.objects.filter((o) => o.kind === "sky");
       await sceneToCanvas(editor, {
         ...scene,
@@ -225,61 +266,141 @@ export default function CanvasPanel({
       return;
     }
 
-    // Cutouts: backdrop blocks first (spatial context), then photo stickers.
+    // ── Cutouts path ───────────────────────────────────────────────────
     const stickerIds = new Set(targets.map((o) => o.id));
     const backdrop = scene.objects
       .filter((o) => !stickerIds.has(o.id))
       .map((o) => {
-        // Force block geometry — no outline blobs behind stickers.
         const { outline: _drop, ...rest } = o;
         void _drop;
         return rest as SceneObject;
       });
 
-    if (backdrop.length) {
-      setBusy("Placing backdrop…");
-      await sceneToCanvas(
-        editor,
-        { ...scene, objects: backdrop },
-        // Legend is added with the cutout pass so it isn't duplicated.
-        { animate: false, legend: false }
-      );
+    const subjects = hasMobileSubjects(scene.objects);
+    const cinematic = quality === "cinematic";
+
+    let plateUrl: string | null = null;
+
+    // Empty plate when the photo has cars/people to rearrange
+    if (subjects) {
+      setBusy("Building empty location plate…");
+      try {
+        const subjectLabels = scene.objects
+          .filter(
+            (o) =>
+              o.mobile ||
+              o.kind === "vehicle" ||
+              o.kind === "character" ||
+              o.kind === "prop"
+          )
+          .map((o) => o.label);
+        const plate = await requestWorld("plate", referenceUrl, {
+          subjectLabels,
+        });
+        plateUrl = plate.url;
+      } catch (err) {
+        console.warn("plate generation failed, continuing without", err);
+      }
     }
 
     const pieces: CutoutPiece[] = [];
-    let done = 0;
-    for (const obj of targets) {
-      const maskUrl = maskByid.get(obj.id);
-      done++;
-      if (!maskUrl) continue;
-      setBusy(`Cutting pieces… ${done}/${targets.length}`);
+    const gotIds = new Set<string>();
+
+    // Cinematic: Scene Atlas (flat color map) → color-key stickers
+    if (cinematic && targets.length) {
+      setBusy("Painting scene atlas…");
       try {
-        const cut = await cutoutFromMask(referenceUrl, maskUrl);
-        if (!cut) continue;
-        const url = await uploadBlobOnly(
-          cut.blob,
-          `projects/${projectId}/cutouts/${obj.id}.png`
-        );
-        pieces.push({
-          label: obj.label,
-          kind: obj.kind,
-          mobile: obj.mobile,
-          url,
-          bbox: cut.bbox,
+        const legend = assignAtlasColors(targets);
+        const atlas = await requestWorld("atlas", referenceUrl, {
+          objects: legend,
         });
-      } catch {
-        // skip pieces that fail to composite
+        if (atlas.url) {
+          setBusy("Cutting stickers from atlas…");
+          const extracted = await cutoutsFromAtlas(
+            referenceUrl,
+            atlas.url,
+            legend
+          );
+          let done = 0;
+          for (const piece of extracted) {
+            done++;
+            setBusy(`Uploading stickers… ${done}/${extracted.length}`);
+            const url = await uploadBlobOnly(
+              piece.blob,
+              `projects/${projectId}/cutouts/${piece.id}.png`
+            );
+            pieces.push({
+              label: piece.label,
+              kind: piece.kind,
+              mobile: piece.mobile,
+              url,
+              bbox: piece.bbox,
+            });
+            gotIds.add(piece.id);
+          }
+        }
+      } catch (err) {
+        console.warn("atlas path failed, falling back to SAM", err);
+      }
+    }
+
+    // SAM for anything the atlas missed (or entire Fast path)
+    const needSam = targets.filter((t) => !gotIds.has(t.id));
+    if (needSam.length) {
+      setBusy(`Segmenting ${needSam.length} objects…`);
+      const maskByid = await segmentWithSam(referenceUrl, needSam, dims);
+      let done = 0;
+      for (const obj of needSam) {
+        const maskUrl = maskByid.get(obj.id);
+        done++;
+        if (!maskUrl) continue;
+        setBusy(`Cutting pieces… ${done}/${needSam.length}`);
+        try {
+          const cut = await cutoutFromMask(referenceUrl, maskUrl);
+          if (!cut) continue;
+          const url = await uploadBlobOnly(
+            cut.blob,
+            `projects/${projectId}/cutouts/${obj.id}.png`
+          );
+          pieces.push({
+            label: obj.label,
+            kind: obj.kind,
+            mobile: obj.mobile,
+            url,
+            bbox: cut.bbox,
+          });
+          gotIds.add(obj.id);
+        } catch {
+          // skip
+        }
       }
     }
 
     if (!pieces.length) {
-      // Stickers failed — fall back to full block scene (includes legend).
-      if (backdrop.length) clearCanvas(editor);
       await sceneToCanvas(editor, scene);
       return;
     }
 
+    // Assemble: clear → plate or blocks → stickers
     setBusy("Assembling the scene…");
+    clearCanvas(editor);
+
+    if (plateUrl) {
+      await imageToCanvasBackground(editor, plateUrl, {
+        fitStage: true,
+        imageW: dims.w,
+        imageH: dims.h,
+        source: "scene-plate",
+        locked: true,
+      });
+    } else if (backdrop.length) {
+      await sceneToCanvas(
+        editor,
+        { ...scene, objects: backdrop },
+        { animate: false, legend: false }
+      );
+    }
+
     await cutoutsToCanvas(editor, {
       pieces,
       imageW: dims.w,
@@ -310,6 +431,8 @@ export default function CanvasPanel({
     }
   }
 
+  const showQuality = sceneMode === "cutouts";
+
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col border border-border-soft">
       <div className="flex items-center justify-between border-b border-border-soft px-2 py-1">
@@ -328,6 +451,19 @@ export default function CanvasPanel({
             <option value="outlines">Outlines</option>
             <option value="blocks">Blocks</option>
           </select>
+          {showQuality && (
+            <select
+              value={sceneQuality}
+              onChange={(e) =>
+                setSceneQuality(e.target.value as SceneQuality)
+              }
+              className="border border-border-soft bg-background px-1 py-1 font-mono text-[10px] uppercase outline-none hover:border-border"
+              title="Fast: SAM stickers. Cinematic: image-model atlas + empty plate when subjects are present (uses image credits)."
+            >
+              <option value="cinematic">Cinematic</option>
+              <option value="fast">Fast</option>
+            </select>
+          )}
           <button
             onClick={translateScene}
             disabled={!!busy || !project?.reference_image_url}
