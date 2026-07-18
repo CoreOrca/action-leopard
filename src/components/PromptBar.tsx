@@ -127,6 +127,7 @@ export default function PromptBar({
           frameAPrompt: project.prompts?.image_a ?? startFrame?.prompt ?? "",
           videoModel: project.video_model,
           seconds,
+          sceneMeta: project.scene_meta,
         }),
       });
       const data = await res.json();

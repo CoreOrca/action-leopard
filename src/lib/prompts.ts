@@ -49,16 +49,21 @@ Guidelines:
 - Mark "mobile": true for anything that could plausibly move during action (vehicles, people, crane arms, doors, boats), false for fixed architecture/terrain.
 - Give short, concrete labels ("red tower crane", "excavator", "woman in grey jacket") — the label is how the filmmaker recognizes the piece.
 - Estimate horizon_y (0..1 from top) if a horizon or eye-line is visible, else null.
+- ALWAYS provide "scale_anchors": 2-4 short sentences estimating real-world dimensions of the most important objects, judged from context ("the orange walkway is about 10 feet wide", "the crane arm is roughly 40 meters long", "an adult figure is about 6 feet tall"). These anchor all downstream proportion decisions.
 
 Respond with ONLY a JSON object:
 {
   "summary": "one-sentence description of the location and situation",
   "horizon_y": 0.42,
+  "scale_anchors": ["..."],
   "objects": [
     { "id": "obj-1", "label": "...", "kind": "vehicle|character|prop|location|set-dressing|architecture|nature|ground|sky|other",
       "x": 0.1, "y": 0.4, "w": 0.2, "h": 0.15, "color": "red", "geo": "rectangle|ellipse|triangle|diamond|trapezoid|arrow-right|arrow-left|cloud|star|hexagon", "mobile": true, "notes": "optional short note" }
   ]
 }`;
+
+export const SCENE_OUTLINE_ADDENDUM = `
+OUTLINE MODE: In addition to the fields above, give EVERY object an "outline": an array of 8-24 normalized [x, y] points (0..1 in image space, clockwise) tracing the object's actual silhouette as seen in the image — the curve of a roofline, the taper of a crane arm, the profile of a car, the posture of a person. The outline is what the filmmaker will see and move, so make it evocative of the real thing: favor the object's most recognizable contour over precision. Curved forms need more points along their curves; keep straight edges to 2 points. The outline must stay within (roughly) the object's bounding box. Still include x/y/w/h, color, and mobile for every object.`;
 
 export const IMAGE_PROMPT_SYSTEM = `${DIRECTOR_VOICE}
 

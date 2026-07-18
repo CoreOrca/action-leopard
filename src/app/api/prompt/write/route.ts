@@ -18,6 +18,8 @@ interface WritePromptBody {
   videoModel?: string;
   /** Seconds between frame A and frame B, or clip duration */
   seconds?: number;
+  /** Scene metadata from translation: real-world scale anchors */
+  sceneMeta?: { summary?: string; scale_anchors?: string[] };
   extra?: string;
 }
 
@@ -33,6 +35,12 @@ export async function POST(request: Request) {
   parts.push(`FILMMAKER'S INTENT:\n${body.intent}`);
   if (body.artDirection?.trim())
     parts.push(`ART DIRECTION (law — follow it):\n${body.artDirection}`);
+  if (body.sceneMeta?.scale_anchors?.length)
+    parts.push(
+      `REAL-WORLD SCALE ANCHORS (cite these to keep proportions true; subjects must stay in true proportion to them):\n${body.sceneMeta.scale_anchors
+        .map((a) => `- ${a}`)
+        .join("\n")}`
+    );
   if (body.elements?.length)
     parts.push(
       `ELEMENTS IN THIS PROJECT:\n${body.elements

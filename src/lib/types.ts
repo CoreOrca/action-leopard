@@ -24,6 +24,7 @@ export interface Project {
   canvas_snapshot: unknown | null;
   current_prompt: string;
   prompts: { image_a?: string; image_b?: string; video?: string };
+  scene_meta: { summary?: string; scale_anchors?: string[] };
   image_model: string;
   video_model: string;
   created_at: string;
@@ -82,10 +83,16 @@ export interface SceneObject {
   /** True if this object could move during the action (vehicle, person, crane arm...) */
   mobile: boolean;
   notes?: string;
+  /** Outline mode: normalized [x,y] points (0..1 in image space) tracing the silhouette */
+  outline?: [number, number][];
 }
 
 export interface SceneTranslation {
   summary: string;
   horizon_y: number | null;
   objects: SceneObject[];
+  /** Real-world dimension estimates for key objects, e.g. "the orange walkway is about 10 feet wide" */
+  scale_anchors?: string[];
 }
+
+export type SceneMode = "blocks" | "outlines";

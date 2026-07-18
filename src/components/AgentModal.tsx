@@ -72,6 +72,7 @@ export default function AgentModal({
             imageModel: project.image_model,
             videoModel: project.video_model,
             canvasShotUrl: latestCanvasShot?.url ?? null,
+            sceneMeta: project.scene_meta,
             elements: elements.map((e) => ({
               kind: e.kind,
               name: e.name,

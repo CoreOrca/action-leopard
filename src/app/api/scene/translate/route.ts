@@ -1,20 +1,25 @@
 import { NextResponse } from "next/server";
 import { chat, extractJson } from "@/lib/xai";
-import { SCENE_TRANSLATE_SYSTEM } from "@/lib/prompts";
+import { SCENE_OUTLINE_ADDENDUM, SCENE_TRANSLATE_SYSTEM } from "@/lib/prompts";
 import type { SceneTranslation } from "@/lib/types";
 
 export const maxDuration = 120;
 
 export async function POST(request: Request) {
-  const { imageUrl, intent } = await request.json();
+  const { imageUrl, intent, mode } = await request.json();
   if (!imageUrl) {
     return NextResponse.json({ error: "imageUrl required" }, { status: 400 });
   }
 
+  const system =
+    mode === "outlines"
+      ? SCENE_TRANSLATE_SYSTEM + SCENE_OUTLINE_ADDENDUM
+      : SCENE_TRANSLATE_SYSTEM;
+
   try {
     const result = await chat(
       [
-        { role: "system", content: SCENE_TRANSLATE_SYSTEM },
+        { role: "system", content: system },
         {
           role: "user",
           content: [
@@ -28,7 +33,7 @@ export async function POST(request: Request) {
           ],
         },
       ],
-      { temperature: 0.2, maxTokens: 8192 }
+      { temperature: 0.2, maxTokens: mode === "outlines" ? 16384 : 8192 }
     );
 
     const scene = extractJson<SceneTranslation>(result.content ?? "");

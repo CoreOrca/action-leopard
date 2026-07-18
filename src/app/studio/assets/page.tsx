@@ -99,13 +99,24 @@ export default function AssetsPage() {
               title={a.prompt ?? a.type}
             >
               {a.type === "video" ? (
-                /* eslint-disable-next-line jsx-a11y/media-has-caption */
-                <video
-                  src={a.url}
-                  muted
-                  preload="metadata"
-                  className="h-full w-full object-cover"
-                />
+                a.thumbnail_url ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={a.thumbnail_url}
+                    alt=""
+                    loading="lazy"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  /* eslint-disable-next-line jsx-a11y/media-has-caption */
+                  <video
+                    src={`${a.url}#t=0.1`}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    className="h-full w-full object-cover"
+                  />
+                )
               ) : (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img

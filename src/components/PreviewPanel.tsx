@@ -113,7 +113,7 @@ export default function PreviewPanel({
               download
               target="_blank"
               rel="noreferrer"
-              className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border"
+              className="inline-flex items-center border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border"
             >
               Download
             </a>
@@ -186,14 +186,18 @@ export default function PreviewPanel({
                 loading="lazy"
                 onClick={() => select(a.id)}
               />
-              {startFrameId === a.id && (
-                <span className="absolute left-0 top-0 bg-foreground px-1 font-mono text-[8px] text-background">
-                  A
-                </span>
-              )}
-              {endFrameId === a.id && (
-                <span className="absolute bottom-0 right-0 bg-foreground px-1 font-mono text-[8px] text-background">
-                  B
+              {(startFrameId === a.id || endFrameId === a.id) && (
+                <span className="absolute left-0 top-0 flex">
+                  {startFrameId === a.id && (
+                    <span className="bg-foreground px-1 font-mono text-[8px] text-background">
+                      A
+                    </span>
+                  )}
+                  {endFrameId === a.id && (
+                    <span className="bg-foreground px-1 font-mono text-[8px] text-background">
+                      B
+                    </span>
+                  )}
                 </span>
               )}
               <button

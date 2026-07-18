@@ -12,6 +12,7 @@
     "@fal-ai/client": "^1.10.1",
     "@supabase/ssr": "^0.12.3",
     "@supabase/supabase-js": "^2.110.7",
+    "@tldraw/tlschema": "5.2.5",
     "@vercel/blob": "^2.6.1",
     "next": "16.2.10",
     "pg": "^8.22.0",

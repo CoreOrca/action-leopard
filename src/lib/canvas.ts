@@ -8,6 +8,7 @@ import {
   type IndexKey,
   type TLShapeId,
 } from "tldraw";
+import { compressLegacySegments } from "@tldraw/tlschema";
 import { upload } from "@vercel/blob/client";
 import { createClient } from "./supabase/client";
 import type { Asset, SceneTranslation } from "./types";
@@ -74,39 +75,112 @@ export async function sceneToCanvas(
   }
 
   for (const obj of sorted) {
-    const id = createShapeId();
-    const w = Math.max(obj.w * STAGE_W, 40);
-    const h = Math.max(obj.h * STAGE_H, 40);
-    editor.createShape({
-      id,
-      type: "geo",
-      x: obj.x * STAGE_W,
-      y: obj.y * STAGE_H,
-      props: {
-        geo: (VALID_GEO.has(obj.geo) ? obj.geo : "rectangle") as "rectangle",
-        w,
-        h,
-        color: (VALID_COLORS.has(obj.color)
-          ? obj.color
-          : "grey") as "grey",
-        fill: "semi",
-        dash: obj.mobile ? "draw" : "solid",
-        size: "s",
-        font: "mono",
-        richText: toRichText(obj.label),
-      },
-      meta: {
-        label: obj.label,
-        kind: obj.kind,
-        mobile: obj.mobile,
-        source: "scene-translation",
-      },
-    });
+    const color = (VALID_COLORS.has(obj.color) ? obj.color : "grey") as "grey";
+    const meta = {
+      label: obj.label,
+      kind: obj.kind,
+      mobile: obj.mobile,
+      source: "scene-translation",
+    };
+
+    if (obj.outline && obj.outline.length >= 3) {
+      // Outline mode: a closed freehand silhouette + a grouped label.
+      const pts = obj.outline.map(([px, py]) => ({
+        x: px * STAGE_W,
+        y: py * STAGE_H,
+      }));
+      const minX = Math.min(...pts.map((p) => p.x));
+      const minY = Math.min(...pts.map((p) => p.y));
+      const local = [...pts, pts[0]].map((p) => ({
+        x: p.x - minX,
+        y: p.y - minY,
+        z: 0.5,
+      }));
+
+      const drawId = createShapeId();
+      editor.createShape({
+        id: drawId,
+        type: "draw",
+        x: minX,
+        y: minY,
+        props: {
+          segments: compressLegacySegments([
+            { type: "free", points: local },
+          ]),
+          isClosed: true,
+          isComplete: true,
+          color,
+          fill: "semi",
+          dash: obj.mobile ? "draw" : "solid",
+          size: "s",
+        },
+        meta,
+      });
+
+      const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+      const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+      const textId = createShapeId();
+      editor.createShape({
+        id: textId,
+        type: "text",
+        x: cx - 60,
+        y: cy - 10,
+        props: {
+          richText: toRichText(obj.label),
+          color,
+          size: "s",
+          font: "mono",
+          autoSize: true,
+        },
+        meta,
+      });
+      editor.groupShapes([drawId, textId]);
+    } else {
+      editor.createShape({
+        id: createShapeId(),
+        type: "geo",
+        x: obj.x * STAGE_W,
+        y: obj.y * STAGE_H,
+        props: {
+          geo: (VALID_GEO.has(obj.geo) ? obj.geo : "rectangle") as "rectangle",
+          w: Math.max(obj.w * STAGE_W, 40),
+          h: Math.max(obj.h * STAGE_H, 40),
+          color,
+          fill: "semi",
+          dash: obj.mobile ? "draw" : "solid",
+          size: "s",
+          font: "mono",
+          richText: toRichText(obj.label),
+        },
+        meta,
+      });
+    }
+
     if (opts.animate) {
       editor.zoomToFit({ animation: { duration: 120 } });
       await new Promise((r) => setTimeout(r, 90));
     }
   }
+
+  if (scene.scale_anchors?.length) {
+    editor.createShape({
+      id: createShapeId(),
+      type: "text",
+      x: 0,
+      y: -80 - scene.scale_anchors.length * 22,
+      props: {
+        richText: toRichText(
+          ["SCALE", ...scene.scale_anchors.map((a) => `· ${a}`)].join("\n")
+        ),
+        color: "grey",
+        size: "s",
+        font: "mono",
+        autoSize: true,
+      },
+      meta: { source: "scene-translation", label: "scale legend" },
+    });
+  }
+
   editor.zoomToFit({ animation: { duration: 300 } });
 }
 

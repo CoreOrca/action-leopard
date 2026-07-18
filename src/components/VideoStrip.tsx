@@ -6,7 +6,7 @@ import { useWorkspace } from "@/lib/store";
 import type { Asset } from "@/lib/types";
 
 export default function VideoStrip() {
-  const { assets, setAssets } = useWorkspace();
+  const { assets, setAssets, select } = useWorkspace();
   const [playing, setPlaying] = useState<Asset | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
 
@@ -62,6 +62,9 @@ export default function VideoStrip() {
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => reorder(v.id)}
               className="group relative h-20 w-32 shrink-0 cursor-grab border border-border-soft hover:border-border"
+              onClick={() => select(v.id)}
+              onDoubleClick={() => setPlaying(v)}
+              title="Click: view in preview · double-click: open player"
             >
               {v.thumbnail_url ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
@@ -69,23 +72,25 @@ export default function VideoStrip() {
                   src={v.thumbnail_url}
                   alt=""
                   className="h-full w-full object-cover"
-                  onClick={() => setPlaying(v)}
                 />
               ) : (
                 /* eslint-disable-next-line jsx-a11y/media-has-caption */
                 <video
-                  src={v.url}
+                  src={`${v.url}#t=0.1`}
                   muted
+                  playsInline
                   preload="metadata"
                   className="h-full w-full object-cover"
-                  onClick={() => setPlaying(v)}
                 />
               )}
               <span className="absolute bottom-0 left-0 bg-background/80 px-1 font-mono text-[9px]">
                 {String(i + 1).padStart(2, "0")}
               </span>
               <button
-                onClick={() => deleteVideo(v.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteVideo(v.id);
+                }}
                 className="absolute right-0 top-0 hidden bg-background/80 px-1.5 font-mono text-[10px] text-danger group-hover:block"
               >
                 ×
@@ -97,7 +102,7 @@ export default function VideoStrip() {
 
       {playing && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85"
           onClick={() => setPlaying(null)}
         >
           <div

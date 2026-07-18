@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import "tldraw/tldraw.css";
 import { getSnapshot, loadSnapshot, type Editor } from "tldraw";
@@ -11,7 +11,7 @@ import {
   saveBlobAsAsset,
   sceneToCanvas,
 } from "@/lib/canvas";
-import type { SceneTranslation } from "@/lib/types";
+import type { SceneMode, SceneTranslation } from "@/lib/types";
 
 const Tldraw = dynamic(async () => (await import("tldraw")).Tldraw, {
   ssr: false,
@@ -21,14 +21,18 @@ export default function CanvasPanel({
   projectId,
   onEditorReady,
   onSnapshotChange,
+  onPatchProject,
 }: {
   projectId: string;
   onEditorReady: (editor: Editor) => void;
   onSnapshotChange: (snapshot: unknown) => void;
+  onPatchProject: (patch: Record<string, unknown>) => void;
 }) {
-  const { project, addAssets, setBusy, busy, assets } = useWorkspace();
+  const { project, patchProject, addAssets, setBusy, busy, assets } =
+    useWorkspace();
   const editorRef = useRef<Editor | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [sceneMode, setSceneMode] = useState<SceneMode>("outlines");
 
   const handleMount = useCallback(
     (editor: Editor) => {
@@ -57,6 +61,8 @@ export default function CanvasPanel({
           // corrupted snapshot; start clean
         }
       }
+      // The snapshot has no camera state — frame the content on open.
+      requestAnimationFrame(() => editor.zoomToFit({ animation: { duration: 0 } }));
 
       editor.store.listen(
         () => {
@@ -87,11 +93,20 @@ export default function CanvasPanel({
         body: JSON.stringify({
           imageUrl: ref,
           intent: useWorkspace.getState().project?.intent ?? "",
+          mode: sceneMode,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "translate failed");
-      await sceneToCanvas(editor, data.scene as SceneTranslation);
+      const scene = data.scene as SceneTranslation;
+      await sceneToCanvas(editor, scene);
+      // Persist scale anchors so the prompt writer can cite them.
+      const scene_meta = {
+        summary: scene.summary,
+        scale_anchors: scene.scale_anchors ?? [],
+      };
+      patchProject({ scene_meta });
+      onPatchProject({ scene_meta });
     } catch (err) {
       alert((err as Error).message);
     } finally {
@@ -128,6 +143,18 @@ export default function CanvasPanel({
           Canvas — blocking &amp; sketch
         </span>
         <div className="flex gap-1">
+          <select
+            value={sceneMode}
+            onChange={(e) => setSceneMode(e.target.value as SceneMode)}
+            className="border border-border-soft bg-background px-1 py-1 font-mono text-[10px] uppercase outline-none hover:border-border"
+            title="How the reference image is rendered onto the canvas"
+          >
+            <option value="outlines">Outlines</option>
+            <option value="blocks">Blocks</option>
+            <option value="traced" disabled>
+              Traced (soon)
+            </option>
+          </select>
           <button
             onClick={translateScene}
             disabled={!!busy || !project?.reference_image_url}
@@ -151,7 +178,7 @@ export default function CanvasPanel({
           </button>
         </div>
       </div>
-      <div className="relative min-h-0 flex-1">
+      <div className="isolate relative z-0 min-h-0 flex-1">
         <Tldraw onMount={handleMount} />
       </div>
     </section>

@@ -98,6 +98,7 @@ interface AgentBody {
     videoModel: string;
     elements: { kind: string; name: string; notes: string; image_url: string | null }[];
     canvasShotUrl?: string | null;
+    sceneMeta?: { summary?: string; scale_anchors?: string[] };
   };
 }
 
@@ -125,6 +126,11 @@ export async function POST(request: Request) {
           `Reference image: ${ctx.referenceImageUrl ?? "(none uploaded)"}`,
           `Latest canvas shot: ${ctx.canvasShotUrl ?? "(none)"}`,
           `Selected image model: ${ctx.imageModel} · Selected video model: ${ctx.videoModel}`,
+          ...(ctx.sceneMeta?.scale_anchors?.length
+            ? [
+                `Real-world scale anchors (keep all proportions true to these): ${ctx.sceneMeta.scale_anchors.join("; ")}`,
+              ]
+            : []),
           `Elements:`,
           ...(ctx.elements.length
             ? ctx.elements.map(
