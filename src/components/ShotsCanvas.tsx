@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useWorkspace } from "@/lib/store";
 import { useSceneAgent } from "@/lib/scene-store";
-import { insertShot, patchShot, deleteShot } from "@/lib/shots";
+import { insertShot, patchShot, deleteShot, reorderShots } from "@/lib/shots";
 import { saveBlobAsAsset } from "@/lib/canvas";
 import type { Shot } from "@/lib/types";
 
@@ -37,6 +37,7 @@ export default function ShotsCanvas({
     activeShotId,
     setActiveShot,
     setView,
+    setShots,
     addShots,
     removeShot,
     patchShotLocal,
@@ -122,6 +123,34 @@ export default function ShotsCanvas({
   async function removeShotFully(id: string) {
     removeShot(id);
     await deleteShot(id);
+  }
+
+  /**
+   * Insert a transition between shots i and i+1: its A/B pair is the previous
+   * shot's end frame and the next shot's start frame, so a clip generated for
+   * it bridges the two.
+   */
+  async function addTransition(i: number) {
+    const prev = shots[i];
+    const next = shots[i + 1];
+    if (!prev?.end_asset_id || !next?.start_asset_id) return;
+    try {
+      const shot = await insertShot(projectId, {
+        kind: "transition",
+        sort_order: next.sort_order,
+        title: "Transition",
+        status: "accepted",
+        start_asset_id: prev.end_asset_id,
+        end_asset_id: next.start_asset_id,
+      });
+      const ordered = [...shots.slice(0, i + 1), shot, ...shots.slice(i + 1)];
+      await reorderShots(ordered.map((s) => s.id));
+      setShots(ordered.map((s, j) => ({ ...s, sort_order: j + 1 })));
+      setActiveShot(shot.id);
+      setView("fixit");
+    } catch (e) {
+      alert((e as Error).message);
+    }
   }
 
   async function uploadStartFrame(file: File) {
@@ -254,7 +283,11 @@ export default function ShotsCanvas({
                 onClick={() => setActiveShot(shot.id)}
                 onDoubleClick={() => openShot(shot.id)}
                 className={`group absolute border bg-panel ${
-                  selected ? "border-foreground" : "border-border-soft hover:border-border"
+                  shot.status === "escalated"
+                    ? "border-danger"
+                    : selected
+                      ? "border-foreground"
+                      : "border-border-soft hover:border-border"
                 }`}
                 style={{
                   left: col * (CARD_W + GAP),
@@ -282,8 +315,13 @@ export default function ShotsCanvas({
                 )}
                 {/* number badge */}
                 <span className="absolute left-1.5 top-1.5 flex h-6 min-w-6 items-center justify-center border border-border bg-background px-1 font-mono text-[10px]">
-                  {i + 1}
+                  {shot.kind === "transition" ? "⇄" : i + 1}
                 </span>
+                {shot.kind === "transition" && (
+                  <span className="absolute left-9 top-1.5 border border-border-soft bg-background px-1 py-px font-mono text-[9px] uppercase tracking-wider text-muted">
+                    transition
+                  </span>
+                )}
                 {/* status / revision chip */}
                 {(statusLabel || shot.revision_count > 0) && url && (
                   <span
@@ -313,6 +351,34 @@ export default function ShotsCanvas({
                   ×
                 </button>
               </div>
+            );
+          })}
+          {/* transition "+" between horizontally adjacent shots */}
+          {shots.slice(0, -1).map((shot, i) => {
+            if (i % COLS === COLS - 1) return null; // row wrap
+            const next = shots[i + 1];
+            const enabled = !!(shot.end_asset_id && next?.start_asset_id);
+            const col = i % COLS;
+            const row = Math.floor(i / COLS);
+            return (
+              <button
+                key={`t-${shot.id}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => addTransition(i)}
+                disabled={!enabled}
+                title={
+                  enabled
+                    ? "Add a transition clip bridging these shots (end frame → next start frame)"
+                    : "Transitions need the left shot's end frame (B) and the right shot's start frame (A)"
+                }
+                className="absolute flex h-6 w-6 items-center justify-center border border-border-soft bg-background font-mono text-[11px] opacity-30 hover:border-border hover:opacity-100 disabled:opacity-10"
+                style={{
+                  left: col * (CARD_W + GAP) + CARD_W + GAP / 2 - 12,
+                  top: row * (CARD_H + GAP) + CARD_H / 2 - 12,
+                }}
+              >
+                +
+              </button>
             );
           })}
         </div>

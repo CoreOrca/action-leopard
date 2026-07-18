@@ -11,7 +11,8 @@ import { createClient } from "./supabase/client";
 import { useWorkspace } from "./store";
 import { useSceneAgent, type ScenePhase } from "./scene-store";
 import { insertShotsFromPlan, deleteShot, patchShot } from "./shots";
-import { getImageModel } from "./models";
+import { getImageModel, getVideoModel } from "./models";
+import { shotIntent } from "./shot-scope";
 import type {
   Asset,
   JudgeVerdict,
@@ -542,6 +543,131 @@ export async function runScene(
     }
   } catch (e) {
     scene.pushEvent({ kind: "error", text: (e as Error).message });
+    scene.setPhase(computeResume(useSceneAgent.getState().shots).phase);
+  }
+}
+
+/**
+ * Generate clips for every finished shot that has no video yet, in sequence
+ * order. Writes the video prompt first (via /api/prompt/write) when a shot
+ * doesn't have one. Confirms the credit spend before starting.
+ */
+export async function makeVideos(): Promise<void> {
+  const { project } = useWorkspace.getState();
+  const scene = useSceneAgent.getState();
+  if (!project) return;
+  if (useSceneAgent.getState().phase === "running") return;
+
+  const eligible = useSceneAgent
+    .getState()
+    .shots.filter(
+      (s) =>
+        !s.video_asset_id &&
+        s.start_asset_id &&
+        (["passed", "accepted"].includes(s.status) || s.kind === "transition")
+    );
+
+  scene.setPanelOpen(true);
+  if (!eligible.length) {
+    scene.pushEvent({
+      kind: "info",
+      text: "No shots are ready for video — shots need a passed or accepted start frame first.",
+    });
+    return;
+  }
+
+  const model = getVideoModel(project.video_model);
+  if (
+    !confirm(
+      `Generate ${eligible.length} video clip${eligible.length > 1 ? "s" : ""} with ${model.label}? This spends fal credits.`
+    )
+  )
+    return;
+
+  scene.setPhase("running");
+  try {
+    for (const s of eligible) {
+      const shot = getShot(s.id);
+      if (!shot) continue;
+      const start = assetById(shot.start_asset_id);
+      if (!start) continue;
+      const end = assetById(shot.end_asset_id);
+
+      let prompt = shot.prompts.video ?? "";
+      if (!prompt.trim()) {
+        scene.pushEvent({
+          kind: "info",
+          shotId: shot.id,
+          text: `${shotLabel(shot.id)}: writing the video prompt…`,
+        });
+        const spec = shot.spec as Partial<ShotSpec>;
+        const res = await fetch("/api/prompt/write", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: "video",
+            intent: shotIntent(project.intent, shot),
+            artDirection: project.art_direction,
+            imageUrls: [
+              { url: start.url, role: "start frame (A)" },
+              ...(end ? [{ url: end.url, role: "end frame (B)" }] : []),
+            ],
+            frameAPrompt: shot.prompts.image_a ?? "",
+            videoModel: project.video_model,
+            seconds: 5,
+            sceneMeta: { scale_anchors: spec.scale_anchors },
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "video prompt failed");
+        prompt = data.prompt;
+        await persistShot(shot.id, {
+          prompts: { ...shot.prompts, video: prompt },
+        });
+      }
+
+      scene.pushEvent({
+        kind: "gen",
+        shotId: shot.id,
+        text: `${shotLabel(shot.id)}: rendering clip (${model.label})…`,
+      });
+      const version =
+        useWorkspace
+          .getState()
+          .assets.filter(
+            (a) =>
+              a.metadata?.shot_id === shot.id &&
+              a.metadata?.shot_role === "video"
+          ).length + 1;
+      const res = await fetch("/api/generate/video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: project.id,
+          prompt,
+          modelId: project.video_model,
+          startImageUrl: start.url,
+          endImageUrl:
+            model.supportsEndFrame && end ? end.url : undefined,
+          duration: 5,
+          metadata: { shot_id: shot.id, shot_role: "video", version },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "video generation failed");
+      useWorkspace.getState().addAssets([data.asset]);
+      await persistShot(shot.id, { video_asset_id: data.asset.id });
+      scene.pushEvent({
+        kind: "gen",
+        shotId: shot.id,
+        text: `${shotLabel(shot.id)}: clip ready.`,
+        imageUrl: data.asset.thumbnail_url ?? start.url,
+      });
+    }
+    scene.pushEvent({ kind: "info", text: "Video pass finished." });
+  } catch (e) {
+    scene.pushEvent({ kind: "error", text: (e as Error).message });
+  } finally {
     scene.setPhase(computeResume(useSceneAgent.getState().shots).phase);
   }
 }

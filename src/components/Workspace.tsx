@@ -22,6 +22,7 @@ import {
   runScene,
   retryShot,
   acceptShot,
+  makeVideos,
 } from "@/lib/scene-agent";
 
 export default function Workspace({ projectId }: { projectId: string }) {
@@ -199,7 +200,11 @@ function SceneShotsPane({ projectId }: { projectId: string }) {
   const view = useSceneAgent((s) => s.view);
   return (
     <div className={view === "shots" ? "flex min-h-0 min-w-0 flex-1" : "hidden"}>
-      <ShotsCanvas projectId={projectId} onImagesFromScript={() => planScene()} />
+      <ShotsCanvas
+        projectId={projectId}
+        onImagesFromScript={() => planScene()}
+        onMakeVideo={() => makeVideos()}
+      />
     </div>
   );
 }
