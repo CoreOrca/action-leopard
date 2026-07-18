@@ -171,7 +171,7 @@ export default function AgentModal({
   if (!agentOpen) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 flex h-[70vh] w-[26rem] flex-col border border-border bg-background shadow-xl">
+    <div className="fixed bottom-4 right-4 z-40 flex h-[70vh] w-104 flex-col border border-border bg-background shadow-xl">
       <div className="flex items-center justify-between border-b border-border-soft px-3 py-2">
         <span className="font-mono text-[10px] uppercase tracking-widest">
           ⟡ Production agent

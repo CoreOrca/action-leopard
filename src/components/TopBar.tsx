@@ -52,7 +52,7 @@ export default function TopBar({
         <button
           onClick={() => setDrawerOpen(!drawerOpen)}
           aria-label="Menu"
-          className="flex h-8 w-8 flex-col items-center justify-center gap-[5px] border border-border-soft hover:border-border"
+          className="flex h-8 w-8 flex-col items-center justify-center gap-1.25 border border-border-soft hover:border-border"
         >
           <span className="block h-px w-4 bg-foreground" />
           <span className="block h-px w-4 bg-foreground" />

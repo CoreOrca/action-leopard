@@ -102,7 +102,7 @@ export default function VideoStrip() {
 
       {playing && (
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85"
+          className="fixed inset-0 z-200 flex items-center justify-center bg-black/85"
           onClick={() => setPlaying(null)}
         >
           <div
