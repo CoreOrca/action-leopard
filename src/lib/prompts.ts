@@ -65,7 +65,16 @@ Respond with ONLY a JSON object:
 }`;
 
 export const SCENE_OUTLINE_ADDENDUM = `
-OUTLINE MODE: In addition to the fields above, give EVERY object an "outline": an array of 8-24 normalized [x, y] points (0..1 in image space, clockwise) tracing the object's actual silhouette as seen in the image — the curve of a roofline, the taper of a crane arm, the profile of a car, the posture of a person. The outline is what the filmmaker will see and move, so make it evocative of the real thing: favor the object's most recognizable contour over precision. Curved forms need more points along their curves; keep straight edges to 2 points. The outline must stay within (roughly) the object's bounding box. Still include x/y/w/h, color, and mobile for every object.`;
+OUTLINE MODE: In addition to the fields above, give EVERY object an "outline": an array of 12-32 normalized [x, y] points (0..1 in image space, clockwise) tracing the object's actual silhouette as seen in the image — the curve of a roofline, the taper of a crane arm, the profile of a car, the posture of a person. The outline is what the filmmaker will see and move, so make it evocative of the real thing: favor the object's most recognizable contour over a generic blob.
+
+CRITICAL SHAPE RULES (avoid teardrops / ovals for everything):
+- Cars and vehicles: use a car-in-perspective polygon — longer along the road, flatter height, distinct windshield/hood/trunk steps; NOT a smooth ellipse.
+- Roads: long thin ribbons following the vanishing lines, not football shapes.
+- Buildings / cliffs / walls: angular, multi-edge footprints matching their rectilinear mass.
+- People: upright figure proportions (taller than wide), not circles.
+- Only use smooth rounded outlines for truly round/organic things (smoke plume, boulder, cloud).
+- Span the real bounding box: the outline's extent should approximately match x/y/w/h — do not shrink into a small blob in the center.
+Still include x/y/w/h, color, and mobile for every object.`;
 
 export const IMAGE_PROMPT_SYSTEM = `${DIRECTOR_VOICE}
 

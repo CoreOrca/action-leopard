@@ -14,7 +14,11 @@ import {
   uploadBlobOnly,
   type CutoutPiece,
 } from "@/lib/canvas";
-import { cutoutFromMask, traceMask } from "@/lib/segment";
+import {
+  cutoutFromMask,
+  isStickerObject,
+  traceMask,
+} from "@/lib/segment";
 import type { SceneMode, SceneObject, SceneTranslation } from "@/lib/types";
 
 const Tldraw = dynamic(async () => (await import("tldraw")).Tldraw, {
@@ -142,15 +146,32 @@ export default function CanvasPanel({
       }
     );
 
-    const targets = scene.objects.filter((o) => o.kind !== "sky");
+    // Traced: segment everything except pure sky.
+    // Cutouts: only "sticker" objects (cars, people, props) get photo pieces;
+    // amorphous sky/ground/terrain stay as movable blocks behind them.
+    const targets =
+      mode === "cutouts"
+        ? scene.objects.filter((o) => isStickerObject(o))
+        : scene.objects.filter((o) => o.kind !== "sky");
+
+    if (!targets.length && mode === "cutouts") {
+      // Nothing sticker-worthy — fall back to blocks for the whole scene.
+      await sceneToCanvas(editor, scene);
+      return;
+    }
+
     setBusy(`Segmenting ${targets.length} objects…`);
     const segRes = await fetch("/api/scene/segment", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         imageUrl: referenceUrl,
+        imageW: dims.w,
+        imageH: dims.h,
         boxes: targets.map((o) => ({
           id: o.id,
+          label: o.label,
+          kind: o.kind,
           x_min: o.x * dims.w,
           y_min: o.y * dims.h,
           x_max: (o.x + o.w) * dims.w,
@@ -195,11 +216,36 @@ export default function CanvasPanel({
             : obj // fall back to its block
         );
       }
-      await sceneToCanvas(editor, { ...scene, objects: withOutlines });
+      // Sky (and anything not in targets) kept as plain blocks.
+      const rest = scene.objects.filter((o) => o.kind === "sky");
+      await sceneToCanvas(editor, {
+        ...scene,
+        objects: [...rest, ...withOutlines],
+      });
       return;
     }
 
-    // Cutouts: composite, upload, place.
+    // Cutouts: backdrop blocks first (spatial context), then photo stickers.
+    const stickerIds = new Set(targets.map((o) => o.id));
+    const backdrop = scene.objects
+      .filter((o) => !stickerIds.has(o.id))
+      .map((o) => {
+        // Force block geometry — no outline blobs behind stickers.
+        const { outline: _drop, ...rest } = o;
+        void _drop;
+        return rest as SceneObject;
+      });
+
+    if (backdrop.length) {
+      setBusy("Placing backdrop…");
+      await sceneToCanvas(
+        editor,
+        { ...scene, objects: backdrop },
+        // Legend is added with the cutout pass so it isn't duplicated.
+        { animate: false, legend: false }
+      );
+    }
+
     const pieces: CutoutPiece[] = [];
     let done = 0;
     for (const obj of targets) {
@@ -225,7 +271,14 @@ export default function CanvasPanel({
         // skip pieces that fail to composite
       }
     }
-    if (!pieces.length) throw new Error("No cutouts could be produced");
+
+    if (!pieces.length) {
+      // Stickers failed — fall back to full block scene (includes legend).
+      if (backdrop.length) clearCanvas(editor);
+      await sceneToCanvas(editor, scene);
+      return;
+    }
+
     setBusy("Assembling the scene…");
     await cutoutsToCanvas(editor, {
       pieces,

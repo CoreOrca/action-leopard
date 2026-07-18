@@ -53,7 +53,7 @@ const VALID_GEO = new Set([
 export async function sceneToCanvas(
   editor: Editor,
   scene: SceneTranslation,
-  opts: { animate?: boolean } = { animate: true }
+  opts: { animate?: boolean; legend?: boolean } = { animate: true }
 ) {
   const sorted = [...scene.objects].sort((a, b) => b.w * b.h - a.w * a.h);
 
@@ -162,7 +162,7 @@ export async function sceneToCanvas(
     }
   }
 
-  addScaleLegend(editor, scene);
+  if (opts.legend !== false) addScaleLegend(editor, scene);
   editor.zoomToFit({ animation: { duration: 300 } });
 }
 

@@ -42,14 +42,20 @@ Next.js App Router app for **spatial control of AI-generated action video**: tra
 
 Minimalist black/white, fine 1px borders, sharp corners (global CSS kills border-radius except inside tldraw), Geist sans + Geist Mono accents, NO blue/purple UI, red/green only when semantically necessary, light+dark modes, no clutter.
 
-## Current state / known issues (as of 2026-07-17)
+## Current state / known issues (as of 2026-07-18)
 
-1. **TOP PRIORITY — Cutouts/Traced segmentation quality is poor.** First live test (Chongqing Raffles City aerial): masks patchy with holes, background regions (sky/skyline/river) came out as amorphous blobs, and the key whole objects (people, main left tower, sky bridges, orange walkway) were not cleanly isolated. Traced mode was worse than grok Outlines. Diagnosis + plan:
-   - Current flow: grok blocks translation → per-object **box** prompts to SAM 3.1 (`apply_mask:false`) → threshold white-ish pixels client-side. The actual SAM 3.1 mask output format was never verified live — masks may be soft/gray or overlay-style, which would break the threshold (explains holes/patchiness).
-   - Next session plan: (a) run ONE cheap live SAM 3.1 call and inspect the returned mask PNG before anything else; (b) switch to **text-concept prompts** (`prompt: "person"`, `"skyscraper"`, `"elevated walkway"`, `"sky bridge"`) with `return_multiple_masks: true, include_boxes: true`, then match returned instances to grok objects by IoU against grok's boxes — SAM 3 text prompts segment whole semantic objects, exactly what box prompts are failing at; (c) mask cleanup: flood-fill hole filling, morphological close, drop components <1% of bbox area; (d) in cutouts mode skip amorphous background kinds (sky, skyline, river, ground) — render those as blocks/outlines behind the cutout pieces; (e) try `apply_mask: true`, which may return ready-made cutouts directly.
-2. Scene-mode default is `cutouts`; v1 baseline (blocks) preserved — revert point commit `6f1a2e5`.
+1. **Segmentation improved (cutouts + traced) — needs live browser verification.**
+   - **Before:** box-only SAM 3.1 + strict white threshold (`r+g+b>380`) → patchy holes, ghost cars, ocean/road speckles as "cutouts". Screenshots in `assets/*_carchase.png`.
+   - **Now:**
+     - `/api/scene/segment`: text concept (from label/kind) + padded box + center point prompt; `return_multiple_masks` + score/IoU pick; still `apply_mask:false`.
+     - `segment.ts`: adaptive (Otsu) threshold, auto-invert, hole fill, morph close, drop tiny components; soft-edge cutout alpha via bilinear upsample of cleaned binary × soft mask strength.
+     - Cutouts mode: only **sticker** kinds (`vehicle|character|prop|set-dressing|other` / mobile) become photo pieces; sky/ground/nature/architecture/location render as **blocks behind** the stickers (spatial context, no ocean confetti).
+     - Outlines: prompt addendum tightened (no generic teardrops; car/road/building shape rules). Blocks path unchanged.
+   - **Revert:** `git revert` the segmentation commit, or reset to pre-fix `bb64f18`. Blocks-only baseline still at `6f1a2e5` (pre-segmentation entirely).
+   - **Still open:** live fal mask-format smoke test; optional procedural scene modes (ASCII / dots / game-tile blocking) not built; further sticker quality once user re-tests cutouts on the car-chase + Chongqing refs.
+2. Scene-mode default is `cutouts`; v1 baseline (blocks) preserved.
 3. Canvas-animation → guide-video recording unimplemented (tldraw renders DOM, not `<canvas>`; needs WebCodecs approach). Users can upload their own guide videos meanwhile.
-4. 360° shot-framing stage not started; `sam-3/3d-objects` fed by the cutout masks is the likely on-ramp; `SceneObject` keeps normalized coords for this.
+4. 360° shot-framing stage not started; `sam-3/3d-objects` fed by the cutout masks is the likely on-ramp; `SceneObject` keeps normalized coords for this. (See session notes / design chat for first-principles drone-camera ideas.)
 5. Seedance-2-fast multi-image refs (`@Image2`+) not yet wired to element images — natural extension of the input-chips row.
 6. Agent messages not persisted to `agent_messages` yet.
 
