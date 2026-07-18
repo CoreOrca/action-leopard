@@ -23,6 +23,9 @@ import {
   retryShot,
   acceptShot,
   makeVideos,
+  makeEndFrames,
+  cancelRun,
+  replanScene,
 } from "@/lib/scene-agent";
 
 export default function Workspace({ projectId }: { projectId: string }) {
@@ -158,6 +161,9 @@ export default function Workspace({ projectId }: { projectId: string }) {
         <SceneAgentPanel
           onGenerate={(dryRun) => runScene({ dryRun })}
           onResume={() => runScene()}
+          onCancel={() => cancelRun()}
+          onReplan={() => replanScene()}
+          onMakeEndFrames={() => makeEndFrames()}
           onRetryShot={(id) => retryShot(id)}
           onAcceptShot={(id) => acceptShot(id)}
           onPlanScene={() => planScene()}

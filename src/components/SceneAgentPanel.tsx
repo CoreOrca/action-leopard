@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useWorkspace } from "@/lib/store";
-import { useSceneAgent, type ScenePhase, type SceneAgentEvent } from "@/lib/scene-store";
+import {
+  useSceneAgent,
+  type ScenePhase,
+  type SceneAgentEvent,
+} from "@/lib/scene-store";
 import { MAX_AUTO_FIXES } from "@/lib/scene-agent";
 import type { Shot, ShotSpec } from "@/lib/types";
 
@@ -25,9 +29,46 @@ const EVENT_GLYPH: Record<SceneAgentEvent["kind"], string> = {
   error: "×",
 };
 
+type WindowMode = "docked" | "floating" | "minimized";
+
+interface WindowState {
+  mode: WindowMode;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  chipX: number;
+  chipY: number;
+}
+
+const WINDOW_KEY = "al-agent-window";
+
+function loadWindowState(): WindowState {
+  const fallback: WindowState = {
+    mode: "docked",
+    x: 80,
+    y: 80,
+    w: 640,
+    h: 640,
+    chipX: -1,
+    chipY: -1,
+  };
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(WINDOW_KEY);
+    if (!raw) return fallback;
+    return { ...fallback, ...JSON.parse(raw) };
+  } catch {
+    return fallback;
+  }
+}
+
 export default function SceneAgentPanel({
   onGenerate,
   onResume,
+  onCancel,
+  onReplan,
+  onMakeEndFrames,
   onRetryShot,
   onAcceptShot,
   onPlanScene,
@@ -35,6 +76,9 @@ export default function SceneAgentPanel({
 }: {
   onGenerate?: (dryRun?: boolean) => void;
   onResume?: () => void;
+  onCancel?: () => void;
+  onReplan?: () => void;
+  onMakeEndFrames?: () => void;
   onRetryShot?: (shotId: string) => void;
   onAcceptShot?: (shotId: string) => void;
   onPlanScene?: () => void;
@@ -52,20 +96,98 @@ export default function SceneAgentPanel({
     setActiveShot,
   } = useSceneAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [win, setWin] = useState<WindowState>(loadWindowState);
+  const drag = useRef<{
+    kind: "panel" | "chip";
+    startX: number;
+    startY: number;
+    baseX: number;
+    baseY: number;
+    moved: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(WINDOW_KEY, JSON.stringify(win));
+    } catch {
+      /* ignore */
+    }
+  }, [win]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [events.length, phase]);
 
-  if (!panelOpen) return null;
+  const startDrag = useCallback(
+    (kind: "panel" | "chip") => (e: React.PointerEvent) => {
+      const el = e.currentTarget as HTMLElement;
+      el.setPointerCapture(e.pointerId);
+      const rect = (
+        kind === "panel" ? el.parentElement! : el
+      ).getBoundingClientRect();
+      drag.current = {
+        kind,
+        startX: e.clientX,
+        startY: e.clientY,
+        baseX: rect.left,
+        baseY: rect.top,
+        moved: false,
+      };
+    },
+    []
+  );
+
+  const onDragMove = useCallback(
+    (e: React.PointerEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      const dx = e.clientX - d.startX;
+      const dy = e.clientY - d.startY;
+      if (!d.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+      d.moved = true;
+      const x = Math.max(0, d.baseX + dx);
+      const y = Math.max(0, d.baseY + dy);
+      if (d.kind === "panel") {
+        // Dragging a docked panel releases it into floating mode.
+        setWin((w) => ({ ...w, mode: "floating", x, y }));
+      } else {
+        setWin((w) => ({ ...w, chipX: x, chipY: y }));
+      }
+    },
+    []
+  );
+
+  const endDrag = useCallback(
+    (restore?: () => void) => (e: React.PointerEvent) => {
+      const d = drag.current;
+      drag.current = null;
+      void e;
+      if (d && !d.moved && restore) restore();
+    },
+    []
+  );
 
   const planned = shots.filter((s) => s.status === "planned");
   const escalated = shots.filter((s) => s.status === "escalated");
+  const endFrameReady = shots.filter(
+    (s) =>
+      s.kind === "shot" &&
+      s.start_asset_id &&
+      !s.end_asset_id &&
+      ["passed", "accepted"].includes(s.status)
+  );
   const resumable =
     phase === "paused" &&
     shots.some((s) =>
       ["approved", "generating", "judging", "fixing"].includes(s.status)
     );
+  const busy = phase === "running" || phase === "planning";
+
+  // Closed panel: keep a progress chip visible while the agent works or
+  // needs the user, so closing never hides an active run.
+  const showChipOnly =
+    (!panelOpen && (busy || escalated.length > 0)) ||
+    (panelOpen && win.mode === "minimized");
 
   const locationThumb = (shot: Shot) =>
     project?.location_map?.find((l) => l.asset_id === shot.location_asset_id)
@@ -77,23 +199,120 @@ export default function SceneAgentPanel({
     setPanelOpen(false);
   }
 
+  if (!panelOpen && !showChipOnly) return null;
+
+  if (showChipOnly) {
+    const chipStyle =
+      win.chipX >= 0
+        ? { left: win.chipX, top: win.chipY }
+        : { right: 16, bottom: 16 };
+    return (
+      <button
+        onPointerDown={startDrag("chip")}
+        onPointerMove={onDragMove}
+        onPointerUp={endDrag(() => {
+          setPanelOpen(true);
+          setWin((w) => ({
+            ...w,
+            mode: w.mode === "minimized" ? "floating" : w.mode,
+          }));
+        })}
+        className="fixed z-50 flex cursor-grab touch-none items-center gap-2 border border-border bg-background px-3 py-2 shadow-xl active:cursor-grabbing"
+        style={chipStyle}
+        title="Action scene maker — click to open, drag to move"
+      >
+        <span className="font-mono text-[10px] uppercase tracking-widest">
+          ⟡ {PHASE_LABEL[phase]}
+        </span>
+        {busy && <span className="h-2 w-2 animate-pulse bg-foreground" />}
+        {escalated.length > 0 && (
+          <span className="border border-danger px-1 font-mono text-[9px] text-danger">
+            {escalated.length}
+          </span>
+        )}
+      </button>
+    );
+  }
+
+  const frameClass =
+    "z-50 flex flex-col border border-border bg-background shadow-xl";
+  const frameStyle: React.CSSProperties =
+    win.mode === "floating"
+      ? {
+          position: "fixed",
+          left: win.x,
+          top: win.y,
+          width: win.w,
+          height: win.h,
+          minWidth: 360,
+          minHeight: 280,
+          maxWidth: "calc(100vw - 2rem)",
+          maxHeight: "calc(100vh - 2rem)",
+          resize: "both",
+          overflow: "hidden",
+        }
+      : {
+          position: "fixed",
+          right: 16,
+          bottom: 16,
+          top: 64,
+          width: "min(40rem, calc(100vw - 2rem))",
+        };
+
   return (
-    <aside className="fixed bottom-4 right-4 top-16 z-50 flex w-[min(40rem,calc(100vw-2rem))] flex-col border border-border bg-background shadow-xl">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-border-soft px-3 py-2">
+    <aside
+      className={frameClass}
+      style={frameStyle}
+      onMouseUp={(e) => {
+        // Capture user resizes (CSS resize handle) into persisted state.
+        if (win.mode !== "floating") return;
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        if (Math.abs(rect.width - win.w) > 2 || Math.abs(rect.height - win.h) > 2)
+          setWin((w) => ({ ...w, w: rect.width, h: rect.height }));
+      }}
+    >
+      {/* Header — drag to move (releases the dock) */}
+      <div
+        onPointerDown={startDrag("panel")}
+        onPointerMove={onDragMove}
+        onPointerUp={endDrag()}
+        className="flex shrink-0 cursor-grab touch-none items-center justify-between border-b border-border-soft px-3 py-2 active:cursor-grabbing"
+        title="Drag to move"
+      >
         <span className="font-mono text-[11px] uppercase tracking-widest">
           ⟡ Action scene maker
           <span className="ml-3 normal-case tracking-normal text-muted">
             {PHASE_LABEL[phase]}
           </span>
         </span>
-        <button
-          onClick={() => setPanelOpen(false)}
-          className="border border-border-soft px-2 py-0.5 font-mono text-[11px] hover:border-border"
-          title="Close (the agent keeps working)"
-        >
-          ×
-        </button>
+        <div className="flex items-center gap-1" onPointerDown={(e) => e.stopPropagation()}>
+          <button
+            onClick={() =>
+              setWin((w) => ({
+                ...w,
+                mode: w.mode === "docked" ? "floating" : "docked",
+              }))
+            }
+            className="border border-border-soft px-2 py-0.5 font-mono text-[11px] hover:border-border"
+            title={win.mode === "docked" ? "Release from dock" : "Dock to the right"}
+          >
+            {win.mode === "docked" ? "⇱" : "⇲"}
+          </button>
+          <button
+            onClick={() => setWin((w) => ({ ...w, mode: "minimized" }))}
+            className="border border-border-soft px-2 py-0.5 font-mono text-[11px] hover:border-border"
+            title="Minimize to a movable chip"
+          >
+            –
+          </button>
+          <button
+            onClick={() => setPanelOpen(false)}
+            className="border border-border-soft px-2 py-0.5 font-mono text-[11px] hover:border-border"
+            title="Close (the agent keeps working — a chip stays while it runs)"
+          >
+            ×
+          </button>
+        </div>
       </div>
 
       {/* Body */}
@@ -143,7 +362,11 @@ export default function SceneAgentPanel({
               </div>
               <button
                 onClick={onPlanScene}
-                disabled={!onPlanScene || !project?.script?.trim() || !project?.location_map?.length}
+                disabled={
+                  !onPlanScene ||
+                  !project?.script?.trim() ||
+                  !project?.location_map?.length
+                }
                 title={
                   !project?.script?.trim()
                     ? "Add a script first"
@@ -226,7 +449,7 @@ export default function SceneAgentPanel({
           return (
             <div key={shot.id} className="mb-3 border border-danger">
               <div className="border-b border-danger px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-danger">
-                Shot {idx} needs you — {MAXED_LABEL}
+                Shot {idx} needs you — auto-fixes exhausted
               </div>
               <div className="p-2">
                 {verdict?.summary && (
@@ -243,7 +466,7 @@ export default function SceneAgentPanel({
                 <div className="mt-2 flex gap-1">
                   <button
                     onClick={() => onRetryShot?.(shot.id)}
-                    disabled={!onRetryShot}
+                    disabled={!onRetryShot || busy}
                     className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background disabled:opacity-40"
                     title="Reset the fix budget and try again"
                   >
@@ -251,7 +474,7 @@ export default function SceneAgentPanel({
                   </button>
                   <button
                     onClick={() => onAcceptShot?.(shot.id)}
-                    disabled={!onAcceptShot}
+                    disabled={!onAcceptShot || busy}
                     className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border disabled:opacity-40"
                     title="Keep the current frame as-is"
                   >
@@ -304,50 +527,77 @@ export default function SceneAgentPanel({
         ))}
       </div>
 
-      {/* Footer: approval gate / resume */}
-      {(planned.length > 0 || resumable) && (
-        <div className="border-t border-border-soft p-2">
-          {planned.length > 0 && (
+      {/* Footer: run controls */}
+      <div className="shrink-0 border-t border-border-soft p-2">
+        {busy && (
+          <button
+            onClick={onCancel}
+            disabled={!onCancel}
+            className="w-full border border-danger px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-danger hover:bg-danger hover:text-background disabled:opacity-40"
+            title="Stop after the step in flight — progress is saved, Resume continues later"
+          >
+            Cancel run
+          </button>
+        )}
+        {!busy && planned.length > 0 && (
+          <>
             <button
               onClick={() => onGenerate?.(dryRun)}
-              disabled={!onGenerate || phase === "running"}
+              disabled={!onGenerate}
               className="w-full border border-foreground px-3 py-2 font-mono text-[11px] uppercase tracking-widest hover:bg-foreground hover:text-background disabled:opacity-40"
             >
               Generate {planned.length} start frame
               {planned.length > 1 ? "s" : ""}
               {dryRun ? " (dry run)" : ""}
             </button>
-          )}
-          {planned.length > 0 && (
             <p className="mt-1 text-center font-mono text-[9px] text-muted">
               ≈ {planned.length} image generation
-              {planned.length > 1 ? "s" : ""} + review passes · auto-fixes capped
-              at {MAX_AUTO_FIXES} per shot
+              {planned.length > 1 ? "s" : ""} + review passes · auto-fixes
+              capped at {MAX_AUTO_FIXES} per shot
             </p>
-          )}
-          {planned.length > 0 && process.env.NODE_ENV === "development" && (
-            <label className="mt-1 flex items-center justify-center gap-1 font-mono text-[9px] uppercase tracking-wider text-muted">
-              <input
-                type="checkbox"
-                checked={dryRun}
-                onChange={(e) => setDryRun(e.target.checked)}
-              />
-              dry run — no fal credits, judge/fix loop only
-            </label>
-          )}
-          {resumable && (
-            <button
-              onClick={onResume}
-              disabled={!onResume}
-              className="mt-1 w-full border border-border px-3 py-2 font-mono text-[11px] uppercase tracking-widest hover:bg-foreground hover:text-background disabled:opacity-40"
-            >
-              Resume run
-            </button>
-          )}
-        </div>
-      )}
+            {process.env.NODE_ENV === "development" && (
+              <label className="mt-1 flex items-center justify-center gap-1 font-mono text-[9px] uppercase tracking-wider text-muted">
+                <input
+                  type="checkbox"
+                  checked={dryRun}
+                  onChange={(e) => setDryRun(e.target.checked)}
+                />
+                dry run — no fal credits, judge/fix loop only
+              </label>
+            )}
+          </>
+        )}
+        {!busy && resumable && (
+          <button
+            onClick={onResume}
+            disabled={!onResume}
+            className="mt-1 w-full border border-border px-3 py-2 font-mono text-[11px] uppercase tracking-widest hover:bg-foreground hover:text-background disabled:opacity-40"
+          >
+            Resume run
+          </button>
+        )}
+        {!busy && endFrameReady.length > 0 && (
+          <button
+            onClick={onMakeEndFrames}
+            disabled={!onMakeEndFrames}
+            className="mt-1 w-full border border-border px-3 py-2 font-mono text-[11px] uppercase tracking-widest hover:bg-foreground hover:text-background disabled:opacity-40"
+            title="Frame B for each finished shot — for end-frame video models like Kling and Seedance"
+          >
+            Generate {endFrameReady.length} end frame
+            {endFrameReady.length > 1 ? "s" : ""}
+          </button>
+        )}
+        {!busy && shots.length > 0 && (
+          <button
+            onClick={onReplan}
+            disabled={!onReplan}
+            className="mt-1 w-full border border-border-soft px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-muted hover:border-border hover:text-foreground disabled:opacity-40"
+            title="Delete all shots and re-plan from the same intent, script, locations, and elements"
+          >
+            ↻ Re-plan scene from inputs
+          </button>
+        )}
+      </div>
     </aside>
   );
 }
-
-const MAXED_LABEL = "auto-fixes exhausted";

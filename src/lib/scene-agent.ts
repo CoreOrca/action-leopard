@@ -25,6 +25,28 @@ import type {
 /** Hard cap: auto-fix regenerations per shot before escalating to the user. */
 export const MAX_AUTO_FIXES = 2;
 
+/** Cooperative cancellation: checked between steps, never mid-API-call. */
+let cancelRequested = false;
+
+/** Ask the current run to stop after the step in flight completes. */
+export function cancelRun(): void {
+  cancelRequested = true;
+  useSceneAgent.getState().pushEvent({
+    kind: "info",
+    text: "Cancelling — stopping after the current step…",
+  });
+}
+
+class RunCancelled extends Error {
+  constructor() {
+    super("run cancelled");
+  }
+}
+
+function throwIfCancelled(): void {
+  if (cancelRequested) throw new RunCancelled();
+}
+
 /** Shot statuses the run loop owns. */
 export const RUNNING_STATUSES: Shot["status"][] = [
   "approved",
@@ -434,6 +456,7 @@ async function processShot(
   // Safety bound: gen+judge+fix cycles can never exceed the fix cap; the
   // counter guards against a stuck status ping-ponging forever.
   for (let step = 0; step < (MAX_AUTO_FIXES + 2) * 3; step++) {
+    throwIfCancelled();
     const shot = getShot(shotId);
     if (!shot) return;
     if (["passed", "accepted", "escalated", "planned"].includes(shot.status))
@@ -501,6 +524,7 @@ export async function runScene(
 
   scene.setPanelOpen(true);
   scene.setPhase("running");
+  cancelRequested = false;
 
   const eligible = useSceneAgent
     .getState()
@@ -521,6 +545,7 @@ export async function runScene(
       await persistShot(s.id, { status: "approved" });
 
     for (const s of eligible) {
+      throwIfCancelled();
       await processShot(project, s.id, !!opts.dryRun);
     }
 
@@ -542,7 +567,168 @@ export async function runScene(
       scene.setPhase("done");
     }
   } catch (e) {
-    scene.pushEvent({ kind: "error", text: (e as Error).message });
+    if (e instanceof RunCancelled) {
+      scene.pushEvent({
+        kind: "info",
+        text: "Run cancelled. Progress is saved — Resume picks up where it stopped.",
+      });
+    } else {
+      scene.pushEvent({ kind: "error", text: (e as Error).message });
+    }
+    scene.setPhase(computeResume(useSceneAgent.getState().shots).phase);
+  } finally {
+    cancelRequested = false;
+  }
+}
+
+/**
+ * Start the scene over: delete ALL shots (generated frames stay in the asset
+ * palette) and re-plan from the same intent, script, locations, and elements.
+ */
+export async function replanScene(): Promise<void> {
+  const scene = useSceneAgent.getState();
+  if (useSceneAgent.getState().phase === "running") return;
+  const shots = useSceneAgent.getState().shots;
+  if (
+    shots.length &&
+    !confirm(
+      "Start over? This deletes all shots and re-plans from your intent, script, and location map. Generated images stay in the asset palette."
+    )
+  )
+    return;
+  await Promise.all(shots.map((s) => deleteShot(s.id)));
+  scene.setShots([]);
+  scene.setActiveShot(null);
+  await planScene();
+}
+
+/**
+ * Generate end frames (frame B) for every passed/accepted shot that has a
+ * start frame and no end frame — for workflows using an end-frame video
+ * model. Auto-writes the image_b prompt when missing. Confirm-gated.
+ */
+export async function makeEndFrames(): Promise<void> {
+  const { project } = useWorkspace.getState();
+  const scene = useSceneAgent.getState();
+  if (!project) return;
+  if (useSceneAgent.getState().phase === "running") return;
+
+  const eligible = useSceneAgent
+    .getState()
+    .shots.filter(
+      (s) =>
+        s.kind === "shot" &&
+        s.start_asset_id &&
+        !s.end_asset_id &&
+        ["passed", "accepted"].includes(s.status)
+    );
+
+  scene.setPanelOpen(true);
+  if (!eligible.length) {
+    scene.pushEvent({
+      kind: "info",
+      text: "No shots are ready for end frames — shots need a passed or accepted start frame first.",
+    });
+    return;
+  }
+  if (
+    !confirm(
+      `Generate ${eligible.length} end frame${eligible.length > 1 ? "s" : ""} (frame B, "same scene, seconds later" edits)? This spends fal credits.`
+    )
+  )
+    return;
+
+  scene.setPhase("running");
+  cancelRequested = false;
+  try {
+    for (const s of eligible) {
+      throwIfCancelled();
+      const shot = getShot(s.id);
+      if (!shot) continue;
+      const start = assetById(shot.start_asset_id);
+      if (!start) continue;
+      const spec = shot.spec as Partial<ShotSpec>;
+      const loc = project.location_map?.find(
+        (l) => l.asset_id === shot.location_asset_id
+      );
+
+      let prompt = shot.prompts.image_b ?? "";
+      if (!prompt.trim()) {
+        scene.pushEvent({
+          kind: "info",
+          shotId: shot.id,
+          text: `${shotLabel(shot.id)}: writing the end-frame prompt…`,
+        });
+        const res = await fetch("/api/prompt/write", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: "image-b",
+            intent: shotIntent(project.intent, shot),
+            artDirection: project.art_direction,
+            imageUrls: [
+              { url: start.url, role: "frame A to edit" },
+              ...(loc ? [{ url: loc.url, role: "location reference" }] : []),
+            ],
+            frameAPrompt: shot.prompts.image_a ?? "",
+            seconds: 5,
+            sceneMeta: { scale_anchors: spec.scale_anchors },
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "end-frame prompt failed");
+        prompt = data.prompt;
+        await persistShot(shot.id, {
+          prompts: { ...shot.prompts, image_b: prompt },
+        });
+      }
+
+      throwIfCancelled();
+      scene.pushEvent({
+        kind: "gen",
+        shotId: shot.id,
+        text: `${shotLabel(shot.id)}: generating end frame…`,
+      });
+      const version =
+        useWorkspace
+          .getState()
+          .assets.filter(
+            (a) =>
+              a.metadata?.shot_id === shot.id && a.metadata?.shot_role === "end"
+          ).length + 1;
+      const res = await fetch("/api/generate/image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: project.id,
+          prompt,
+          imageUrls: [start.url, ...(loc ? [loc.url] : [])],
+          modelId: project.image_model,
+          aspectRatio: "16:9",
+          metadata: { shot_id: shot.id, shot_role: "end", version },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "end-frame generation failed");
+      const asset = data.assets[0] as Asset;
+      useWorkspace.getState().addAssets([asset]);
+      await persistShot(shot.id, { end_asset_id: asset.id });
+      scene.pushEvent({
+        kind: "gen",
+        shotId: shot.id,
+        text: `${shotLabel(shot.id)}: end frame ready.`,
+        imageUrl: asset.url,
+      });
+    }
+    scene.pushEvent({ kind: "info", text: "End-frame pass finished." });
+  } catch (e) {
+    if (e instanceof RunCancelled) {
+      scene.pushEvent({ kind: "info", text: "End-frame pass cancelled." });
+    } else {
+      scene.pushEvent({ kind: "error", text: (e as Error).message });
+    }
+  } finally {
+    cancelRequested = false;
     scene.setPhase(computeResume(useSceneAgent.getState().shots).phase);
   }
 }
@@ -585,8 +771,10 @@ export async function makeVideos(): Promise<void> {
     return;
 
   scene.setPhase("running");
+  cancelRequested = false;
   try {
     for (const s of eligible) {
+      throwIfCancelled();
       const shot = getShot(s.id);
       if (!shot) continue;
       const start = assetById(shot.start_asset_id);
@@ -666,8 +854,13 @@ export async function makeVideos(): Promise<void> {
     }
     scene.pushEvent({ kind: "info", text: "Video pass finished." });
   } catch (e) {
-    scene.pushEvent({ kind: "error", text: (e as Error).message });
+    if (e instanceof RunCancelled) {
+      scene.pushEvent({ kind: "info", text: "Video pass cancelled." });
+    } else {
+      scene.pushEvent({ kind: "error", text: (e as Error).message });
+    }
   } finally {
+    cancelRequested = false;
     scene.setPhase(computeResume(useSceneAgent.getState().shots).phase);
   }
 }
