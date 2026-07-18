@@ -188,6 +188,8 @@ export interface JudgeFix {
 export interface JudgeVerdict {
   /** Which frame version was judged (1 = first generation). */
   version: number;
+  /** The judge's observe-first pass: visible faces, landmark edges, obstacles. */
+  observed?: string;
   pass: boolean;
   checks: JudgeCheck[];
   summary: string;

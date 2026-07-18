@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { chat } from "@/lib/xai";
+import { reviewChat } from "@/lib/anthropic";
 import {
   ACTION_DIRECTIVES,
   IMAGE_PROMPT_SYSTEM,
@@ -51,14 +51,15 @@ export async function POST(request: Request) {
   ].filter(Boolean);
 
   try {
-    const result = await chat(
-      [
-        { role: "system", content: system },
-        { role: "user", content: lines.join("\n\n") },
-      ],
-      { temperature: 0.6, maxTokens: 4096 }
-    );
-    const prompt = result.content?.trim();
+    // Claude Sonnet 5 rewrites (independent of the grok planner); grok
+    // fallback when no ANTHROPIC_API_KEY is configured.
+    const raw = await reviewChat({
+      system,
+      content: lines.join("\n\n"),
+      maxTokens: 8192,
+      temperature: 0.6,
+    });
+    const prompt = raw.trim();
     if (!prompt) throw new Error("Fix pass returned an empty prompt");
     return NextResponse.json({ prompt });
   } catch (err) {

@@ -1,9 +1,67 @@
 import { NextResponse } from "next/server";
-import { chat, extractJson, type ChatContent } from "@/lib/xai";
+import { extractJson, type ChatContent } from "@/lib/xai";
+import { reviewChat } from "@/lib/anthropic";
 import { ACTION_DIRECTIVES, SHOT_JUDGE_SYSTEM } from "@/lib/prompts";
 import type { JudgeVerdict, ShotSpec } from "@/lib/types";
 
 export const maxDuration = 120;
+
+/** Strict schema for the verdict — structured outputs guarantee valid JSON. */
+const VERDICT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["observed", "pass", "checks", "summary", "fix"],
+  properties: {
+    observed: { type: "string" },
+    pass: { type: "boolean" },
+    summary: { type: "string" },
+    checks: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "pass"],
+        properties: {
+          id: {
+            type: "string",
+            enum: [
+              "location-fidelity",
+              "scale-proportion",
+              "screen-direction",
+              "continuity-adjacent",
+              "anatomy",
+              "script-intent",
+              "art-direction",
+            ],
+          },
+          pass: { type: "boolean" },
+          issue: { type: "string" },
+        },
+      },
+    },
+    fix: {
+      type: "object",
+      additionalProperties: false,
+      required: ["strategy", "notes"],
+      properties: {
+        strategy: {
+          type: "string",
+          enum: ["revise-prompt", "change-inputs", "canvas-blocking"],
+        },
+        notes: { type: "string" },
+        revised_prompt: { type: "string" },
+        inputs: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            add: { type: "array", items: { type: "string" } },
+            remove: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+    },
+  },
+};
 
 interface JudgeBody {
   shot: {
@@ -76,16 +134,19 @@ export async function POST(request: Request) {
     );
   }
 
-  const messages = [
-    { role: "system" as const, content: system },
-    { role: "user" as const, content },
-  ];
-
   let verdict: JudgeVerdict | null = null;
   for (let attempt = 0; attempt < 2 && !verdict; attempt++) {
     try {
-      const result = await chat(messages, { temperature: 0.2, maxTokens: 4096 });
-      verdict = extractJson<JudgeVerdict>(result.content ?? "");
+      // Claude Sonnet 5 judges (independent of the grok planner); grok fallback
+      // when no ANTHROPIC_API_KEY is configured.
+      const raw = await reviewChat({
+        system,
+        content,
+        maxTokens: 8192,
+        temperature: 0.2,
+        jsonSchema: VERDICT_SCHEMA,
+      });
+      verdict = extractJson<JudgeVerdict>(raw);
     } catch {
       // retry once; fall through to synthetic verdict after
     }
