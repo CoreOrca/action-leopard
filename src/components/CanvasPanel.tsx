@@ -258,7 +258,7 @@ export default function CanvasPanel({
   }
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col border border-border-soft">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col border border-border-soft">
       <div className="flex items-center justify-between border-b border-border-soft px-2 py-1">
         <span className="font-mono text-[10px] uppercase tracking-widest text-muted">
           Canvas — blocking &amp; sketch
