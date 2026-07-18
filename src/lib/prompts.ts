@@ -45,6 +45,8 @@ TASK: Look at the user's reference image of a location (possibly with characters
 Guidelines:
 - Identify every distinct object that matters for blocking action: vehicles, people, large props, machinery, architecture, natural features, significant set dressing. Merge trivial clutter into its parent ("dressing on table" not five separate cups).
 - STRUCTURAL AND CONNECTIVE ELEMENTS ARE CRITICAL: supports, pylons, columns, sky bridges, walkways, cables, trusses — capture each as its own object, especially anything one structure rests on or connects to another through. A tower and the sky bridge joining it to its neighbor are separate objects. Missing the structure that holds something up is a failure.
+- HERO GLASS / CURVED STRUCTURES: when a large curved glass skybridge, horizontal glass link, or cylindrical glass building mass dominates the frame, list it as its own architecture object with a bounding box that spans the FULL visible structure (not a thin connector stub). Label clearly (e.g. "curved glass skybridge", "horizontal glass link").
+- People standing ON a walkway or bridge are separate objects from the walkway/bridge — never merge a person into architecture.
 - Convey depth: when a structure recedes into the background, say so in notes ("recedes toward background, far end near horizon") and let its bounding box span the recession.
 - Preserve spatial layout: give each object its normalized bounding box (0..1, origin top-left) in the image.
 - Choose a simple geometry that best evokes the silhouette, and a tldraw color close to the object's real dominant color. Allowed colors: black, grey, light-violet, violet, blue, light-blue, yellow, orange, green, light-green, light-red, red, white.

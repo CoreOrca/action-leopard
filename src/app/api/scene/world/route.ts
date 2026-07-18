@@ -41,19 +41,28 @@ function platePrompt(subjectHints: string[]): string {
 function atlasPrompt(objects: AtlasObject[]): string {
   const lines = objects.map(
     (o) =>
-      `- "${o.label}" (${o.kind}): fill its entire visible region with solid ${hex(o.r, o.g, o.b)} only`
+      `- "${o.label}" (${o.kind}): fill its ENTIRE visible silhouette with solid ${hex(o.r, o.g, o.b)} only — leave nothing of this object unpainted`
   );
   return [
-    "Recolor this photograph into a hard-edged flat color instance map for segmentation.",
-    "Each distinct structural or action element gets ONE solid unique color — no gradients, no textures, no shadows, no labels, no text, no outlines.",
+    "Recolor this photograph into a hard-edged flat color INSTANCE MAP for segmentation.",
+    "Each listed element gets ONE solid unique color — no gradients, no textures, no shadows, no labels, no text, no outlines, no anti-aliased blend between regions.",
     "Keep the exact same framing, proportions, and camera as the input image.",
-    "Paint carefully to object boundaries (glass towers, skybridges, walkways, cars, people, railings as separate regions).",
+    "",
+    "CRITICAL COMPLETENESS:",
+    "- You MUST paint EVERY object in the legend. Do not skip large architecture.",
+    "- Horizontal and curved GLASS skybridges, skywalks, and cylindrical glass links are often the largest hero structures — if listed, fill their full glass mass, not just a connector stub.",
+    "- Towers, walkways, railings, cars, and people are separate regions even when they touch.",
+    "",
+    "CRITICAL SEPARATION (no merging):",
+    "- NEVER paint a person the same color as architecture, walkway, glass, or railing under their feet.",
+    "- NEVER paint tire spray, dust, sand, smoke, or road surface as part of a vehicle — only the vehicle body.",
+    "- People = tight body silhouette only. Vehicles = body + wheels only.",
     "",
     "Color legend (use these exact RGB hex colors):",
     ...lines,
     "",
-    "Anything not listed (empty sky, continuous far haze if unlisted): solid #F0F0F0.",
-    "Output pure posterized flat regions only — like a graphic design color key, not a painting.",
+    "Anything not listed (empty sky, continuous river/ocean if unlisted, far haze): solid #F0F0F0.",
+    "Output pure posterized flat regions only — graphic color key, not a painting.",
   ].join("\n");
 }
 

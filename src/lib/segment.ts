@@ -26,6 +26,19 @@ export interface AtlasLegendEntry {
   r: number;
   g: number;
   b: number;
+  /** Normalized grok box 0..1 — used to clip over-inclusive atlas/SAM regions */
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+}
+
+/** Normalized clip box in image space (0..1). */
+export interface NormBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export interface CutoutResult {
@@ -184,9 +197,8 @@ function fillHoles(bin: Uint8Array, w: number, h: number) {
   }
 }
 
-function morphClose(bin: Uint8Array, w: number, h: number, radius: number) {
-  const n = w * h;
-  const dil = new Uint8Array(n);
+function dilate(bin: Uint8Array, w: number, h: number, radius: number): Uint8Array {
+  const out = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       let on = 0;
@@ -200,9 +212,14 @@ function morphClose(bin: Uint8Array, w: number, h: number, radius: number) {
           }
         }
       }
-      dil[y * w + x] = on;
+      out[y * w + x] = on;
     }
   }
+  return out;
+}
+
+function erode(bin: Uint8Array, w: number, h: number, radius: number): Uint8Array {
+  const out = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       let on = 1;
@@ -210,15 +227,59 @@ function morphClose(bin: Uint8Array, w: number, h: number, radius: number) {
         for (let dx = -radius; dx <= radius; dx++) {
           const nx = x + dx;
           const ny = y + dy;
-          if (nx < 0 || ny < 0 || nx >= w || ny >= h || !dil[ny * w + nx]) {
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h || !bin[ny * w + nx]) {
             on = 0;
             break outer;
           }
         }
       }
-      bin[y * w + x] = on;
+      out[y * w + x] = on;
     }
   }
+  return out;
+}
+
+function morphClose(bin: Uint8Array, w: number, h: number, radius: number) {
+  const dil = dilate(bin, w, h, radius);
+  const closed = erode(dil, w, h, radius);
+  bin.set(closed);
+}
+
+/** Erode then dilate — severs thin bridges (sand plumes, bridge fragments on people). */
+function morphOpen(bin: Uint8Array, w: number, h: number, radius: number) {
+  const er = erode(bin, w, h, radius);
+  const opened = dilate(er, w, h, radius);
+  bin.set(opened);
+}
+
+/** Zero mask outside a padded normalized box (drops atlas/SAM bleed). */
+function clipBinaryToNormBox(
+  bin: Uint8Array,
+  w: number,
+  h: number,
+  box: NormBox | undefined,
+  padFrac = 0.12
+) {
+  if (!box || box.w <= 0 || box.h <= 0) return;
+  const padX = box.w * padFrac;
+  const padY = box.h * padFrac;
+  const x0 = Math.max(0, Math.floor((box.x - padX) * w));
+  const y0 = Math.max(0, Math.floor((box.y - padY) * h));
+  const x1 = Math.min(w - 1, Math.ceil((box.x + box.w + padX) * w));
+  const y1 = Math.min(h - 1, Math.ceil((box.y + box.h + padY) * h));
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (x < x0 || x > x1 || y < y0 || y > y1) bin[y * w + x] = 0;
+    }
+  }
+}
+
+/** Keep only the single largest connected component. */
+function keepOnlyLargest(bin: Uint8Array, w: number, h: number) {
+  keepLargestComponents(bin, w, h, 1.0); // minFrac 1 → none pass → falls back to largest
+  // keepLargestComponents with minFrac 1 means minArea = total, only components >= total keep
+  // Actually minArea = max(16, total*1) = total, so only component with area >= total keeps - i.e. if one component has all, OK.
+  // If multiple, none >= total unless one has all. Then "if (!keep.some) keep largest" - good.
 }
 
 function keepLargestComponents(
@@ -574,10 +635,16 @@ export async function traceMask(maskUrl: string): Promise<TracedMask | null> {
 /**
  * Composite reference × mask → tightly-cropped transparent PNG.
  * Distance-field feather at high cleanup res for smooth sticker edges.
+ * Optional clipBox (normalized) drops sand/bridge bleed outside the object.
  */
 export async function cutoutFromMask(
   referenceUrl: string,
-  maskUrl: string
+  maskUrl: string,
+  opts?: {
+    clipBox?: NormBox;
+    /** Vehicles/characters: open + keep largest to drop attached debris */
+    tightSubject?: boolean;
+  }
 ): Promise<CutoutResult | null> {
   const [ref, mask] = await Promise.all([
     loadBitmap(referenceUrl),
@@ -588,6 +655,11 @@ export async function cutoutFromMask(
   const h = ref.height;
 
   const { data: bin, w: bw, h: bh } = maskToBinary(mask, 1280);
+  clipBinaryToNormBox(bin, bw, bh, opts?.clipBox, opts?.tightSubject ? 0.1 : 0.14);
+  if (opts?.tightSubject) {
+    morphOpen(bin, bw, bh, 1);
+    keepOnlyLargest(bin, bw, bh);
+  }
   // Feather ~2.5px at cleanup res, scales visually with image
   const feather = Math.max(2, Math.round(Math.min(bw, bh) * 0.004));
   const feathered = binaryToFeatheredAlpha(bin, bw, bh, feather);
@@ -654,12 +726,14 @@ export async function cutoutFromMask(
 /**
  * Extract stickers from a flat-color Scene Atlas + the original photo.
  * Each legend color keys a region; matched pixels pull photo content.
+ * Clips to each object's grok box so people don't keep bridge chunks
+ * and cars don't keep sand plumes outside their box.
  */
 export async function cutoutsFromAtlas(
   referenceUrl: string,
   atlasUrl: string,
   legend: AtlasLegendEntry[],
-  colorTolerance = 48
+  colorTolerance = 36
 ): Promise<
   {
     id: string;
@@ -699,9 +773,16 @@ export async function cutoutsFromAtlas(
     bbox: { x: number; y: number; w: number; h: number };
   }[] = [];
 
-  const tol2 = colorTolerance * colorTolerance;
-
   for (const entry of legend) {
+    const isSubject =
+      entry.kind === "character" ||
+      entry.kind === "vehicle" ||
+      entry.kind === "prop" ||
+      entry.mobile;
+    // Tighter color match for small subjects (less bleed into nearby colors)
+    const tol = isSubject ? Math.min(colorTolerance, 32) : colorTolerance;
+    const tol2 = tol * tol;
+
     const bin = new Uint8Array(w * h);
     let count = 0;
     for (let i = 0; i < w * h; i++) {
@@ -715,8 +796,22 @@ export async function cutoutsFromAtlas(
     }
     if (count < 64) continue;
 
-    cleanMask(bin, w, h);
-    // Recount after cleanup
+    // Clip first so cleanup doesn't fill holes outside the object
+    const clipBox =
+      entry.w != null && entry.h != null
+        ? { x: entry.x ?? 0, y: entry.y ?? 0, w: entry.w, h: entry.h }
+        : undefined;
+    clipBinaryToNormBox(bin, w, h, clipBox, isSubject ? 0.08 : 0.12);
+
+    if (isSubject) {
+      morphOpen(bin, w, h, 1);
+      keepOnlyLargest(bin, w, h);
+    } else {
+      cleanMask(bin, w, h);
+      // Light open to drop speckles stuck to large structures
+      morphOpen(bin, w, h, 1);
+    }
+
     count = 0;
     for (let i = 0; i < w * h; i++) if (bin[i]) count++;
     if (count < 64) continue;
@@ -810,11 +905,32 @@ export const ATLAS_PALETTE: [number, number, number][] = [
 ];
 
 export function assignAtlasColors(
-  objects: { id: string; label: string; kind: string; mobile: boolean }[]
+  objects: {
+    id: string;
+    label: string;
+    kind: string;
+    mobile: boolean;
+    x?: number;
+    y?: number;
+    w?: number;
+    h?: number;
+  }[]
 ): AtlasLegendEntry[] {
   return objects.map((o, i) => {
     const [r, g, b] = ATLAS_PALETTE[i % ATLAS_PALETTE.length];
-    return { id: o.id, label: o.label, kind: o.kind, mobile: o.mobile, r, g, b };
+    return {
+      id: o.id,
+      label: o.label,
+      kind: o.kind,
+      mobile: o.mobile,
+      r,
+      g,
+      b,
+      x: o.x,
+      y: o.y,
+      w: o.w,
+      h: o.h,
+    };
   });
 }
 
@@ -869,10 +985,19 @@ export function isStickerObject(obj: {
   }
   if (obj.mobile) return true;
 
-  // Architecture / location: discrete structures are stickers (Chongqing towers,
-  // skybridges, walkways). Full-frame slabs stay backdrop.
+  // Named structural pieces are always stickers (curved glass spans can be large).
+  if (
+    /(tower|skybridge|sky\s*bridge|walkway|glass|bridge|connector|railing|crane|building|high-?rise|rooftop)/i.test(
+      label
+    )
+  ) {
+    return area < 0.85;
+  }
+
+  // Architecture / location: allow large hero structures (Raffles glass link).
+  // Only exclude near-full-frame backdrop slabs.
   if (kind === "architecture" || kind === "location") {
-    return area < 0.55;
+    return area < 0.72;
   }
 
   // Nature: small rocks/trees yes; large hills/embankments no
