@@ -95,4 +95,4 @@ export interface SceneTranslation {
   scale_anchors?: string[];
 }
 
-export type SceneMode = "blocks" | "outlines";
+export type SceneMode = "blocks" | "outlines" | "traced" | "cutouts";

@@ -7,11 +7,15 @@ import { getSnapshot, loadSnapshot, type Editor } from "tldraw";
 import { useWorkspace } from "@/lib/store";
 import {
   clearCanvas,
+  cutoutsToCanvas,
   exportCanvasPng,
   saveBlobAsAsset,
   sceneToCanvas,
+  uploadBlobOnly,
+  type CutoutPiece,
 } from "@/lib/canvas";
-import type { SceneMode, SceneTranslation } from "@/lib/types";
+import { cutoutFromMask, traceMask } from "@/lib/segment";
+import type { SceneMode, SceneObject, SceneTranslation } from "@/lib/types";
 
 const Tldraw = dynamic(async () => (await import("tldraw")).Tldraw, {
   ssr: false,
@@ -32,7 +36,7 @@ export default function CanvasPanel({
     useWorkspace();
   const editorRef = useRef<Editor | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [sceneMode, setSceneMode] = useState<SceneMode>("outlines");
+  const [sceneMode, setSceneMode] = useState<SceneMode>("cutouts");
 
   const handleMount = useCallback(
     (editor: Editor) => {
@@ -85,21 +89,29 @@ export default function CanvasPanel({
       alert("Upload a reference image first (left panel).");
       return;
     }
-    setBusy("Translating location into scene…");
+    setBusy("Reading the location…");
     try {
+      // Segmentation modes use grok's bounding boxes as SAM2 prompts.
+      const translateMode = sceneMode === "outlines" ? "outlines" : "blocks";
       const res = await fetch("/api/scene/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           imageUrl: ref,
           intent: useWorkspace.getState().project?.intent ?? "",
-          mode: sceneMode,
+          mode: translateMode,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "translate failed");
       const scene = data.scene as SceneTranslation;
-      await sceneToCanvas(editor, scene);
+
+      if (sceneMode === "traced" || sceneMode === "cutouts") {
+        await buildSegmentedScene(editor, ref, scene, sceneMode);
+      } else {
+        await sceneToCanvas(editor, scene);
+      }
+
       // Persist scale anchors so the prompt writer can cite them.
       const scene_meta = {
         summary: scene.summary,
@@ -112,6 +124,115 @@ export default function CanvasPanel({
     } finally {
       setBusy(null);
     }
+  }
+
+  async function buildSegmentedScene(
+    editor: Editor,
+    referenceUrl: string,
+    scene: SceneTranslation,
+    mode: "traced" | "cutouts"
+  ) {
+    const dims = await new Promise<{ w: number; h: number }>(
+      (resolve, reject) => {
+        const img = new Image();
+        img.onload = () =>
+          resolve({ w: img.naturalWidth, h: img.naturalHeight });
+        img.onerror = () => reject(new Error("Could not load reference image"));
+        img.src = referenceUrl;
+      }
+    );
+
+    const targets = scene.objects.filter((o) => o.kind !== "sky");
+    setBusy(`Segmenting ${targets.length} objects…`);
+    const segRes = await fetch("/api/scene/segment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        imageUrl: referenceUrl,
+        boxes: targets.map((o) => ({
+          id: o.id,
+          x_min: o.x * dims.w,
+          y_min: o.y * dims.h,
+          x_max: (o.x + o.w) * dims.w,
+          y_max: (o.y + o.h) * dims.h,
+        })),
+      }),
+    });
+    const segData = await segRes.json();
+    if (!segRes.ok) throw new Error(segData.error ?? "segmentation failed");
+    const maskByid = new Map<string, string | null>(
+      (segData.masks as { id: string; maskUrl: string | null }[]).map((m) => [
+        m.id,
+        m.maskUrl,
+      ])
+    );
+
+    if (mode === "traced") {
+      setBusy("Tracing silhouettes…");
+      const withOutlines: SceneObject[] = [];
+      for (const obj of targets) {
+        const maskUrl = maskByid.get(obj.id);
+        let traced = null;
+        if (maskUrl) {
+          try {
+            traced = await traceMask(maskUrl);
+          } catch {
+            traced = null;
+          }
+        }
+        withOutlines.push(
+          traced
+            ? {
+                ...obj,
+                outline: traced.polygon.map(
+                  ([px, py]) =>
+                    [px / traced!.imageW, py / traced!.imageH] as [
+                      number,
+                      number,
+                    ]
+                ),
+              }
+            : obj // fall back to its block
+        );
+      }
+      await sceneToCanvas(editor, { ...scene, objects: withOutlines });
+      return;
+    }
+
+    // Cutouts: composite, upload, place.
+    const pieces: CutoutPiece[] = [];
+    let done = 0;
+    for (const obj of targets) {
+      const maskUrl = maskByid.get(obj.id);
+      done++;
+      if (!maskUrl) continue;
+      setBusy(`Cutting pieces… ${done}/${targets.length}`);
+      try {
+        const cut = await cutoutFromMask(referenceUrl, maskUrl);
+        if (!cut) continue;
+        const url = await uploadBlobOnly(
+          cut.blob,
+          `projects/${projectId}/cutouts/${obj.id}.png`
+        );
+        pieces.push({
+          label: obj.label,
+          kind: obj.kind,
+          mobile: obj.mobile,
+          url,
+          bbox: cut.bbox,
+        });
+      } catch {
+        // skip pieces that fail to composite
+      }
+    }
+    if (!pieces.length) throw new Error("No cutouts could be produced");
+    setBusy("Assembling the scene…");
+    await cutoutsToCanvas(editor, {
+      pieces,
+      imageW: dims.w,
+      imageH: dims.h,
+      scene,
+    });
   }
 
   async function screenshotToAsset() {
@@ -149,11 +270,10 @@ export default function CanvasPanel({
             className="border border-border-soft bg-background px-1 py-1 font-mono text-[10px] uppercase outline-none hover:border-border"
             title="How the reference image is rendered onto the canvas"
           >
+            <option value="cutouts">Cutouts</option>
+            <option value="traced">Traced</option>
             <option value="outlines">Outlines</option>
             <option value="blocks">Blocks</option>
-            <option value="traced" disabled>
-              Traced (soon)
-            </option>
           </select>
           <button
             onClick={translateScene}

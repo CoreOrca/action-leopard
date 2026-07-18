@@ -46,6 +46,23 @@ export default function TopBar({
     router.refresh();
   }
 
+  async function createProject() {
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("projects")
+      .insert({ user_id: user.id, name: "Untitled project" })
+      .select()
+      .single();
+    if (!error && data) {
+      setDrawerOpen(false);
+      router.push(`/studio/${data.id}`);
+    }
+  }
+
   return (
     <header className="relative z-40 flex h-12 items-center justify-between border-b border-border-soft bg-background px-3">
       <div className="flex items-center gap-3">
@@ -162,6 +179,12 @@ export default function TopBar({
           >
             Assets
           </Link>
+          <button
+            onClick={createProject}
+            className="block w-full border-b border-border-soft px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider hover:bg-foreground hover:text-background"
+          >
+            + New project
+          </button>
           <div className="px-4 py-3 font-mono text-[10px] uppercase tracking-wider text-muted">
             {project?.name}
           </div>

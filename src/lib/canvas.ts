@@ -162,26 +162,114 @@ export async function sceneToCanvas(
     }
   }
 
-  if (scene.scale_anchors?.length) {
+  addScaleLegend(editor, scene);
+  editor.zoomToFit({ animation: { duration: 300 } });
+}
+
+function addScaleLegend(editor: Editor, scene: SceneTranslation) {
+  if (!scene.scale_anchors?.length) return;
+  editor.createShape({
+    id: createShapeId(),
+    type: "text",
+    x: 0,
+    y: -80 - scene.scale_anchors.length * 22,
+    props: {
+      richText: toRichText(
+        ["SCALE", ...scene.scale_anchors.map((a) => `· ${a}`)].join("\n")
+      ),
+      color: "grey",
+      size: "s",
+      font: "mono",
+      autoSize: true,
+    },
+    meta: { source: "scene-translation", label: "scale legend" },
+  });
+}
+
+export interface CutoutPiece {
+  label: string;
+  kind: string;
+  mobile: boolean;
+  /** Blob URL of the transparent PNG cutout */
+  url: string;
+  /** Crop bbox in reference-image pixel coords */
+  bbox: { x: number; y: number; w: number; h: number };
+}
+
+/**
+ * Cutout mode: place transparent PNG pieces of the actual reference image as
+ * movable image shapes, preserving their positions and relative scale.
+ */
+export async function cutoutsToCanvas(
+  editor: Editor,
+  opts: {
+    pieces: CutoutPiece[];
+    imageW: number;
+    imageH: number;
+    scene: SceneTranslation;
+    animate?: boolean;
+  }
+) {
+  const scale = Math.min(STAGE_W / opts.imageW, STAGE_H / opts.imageH);
+
+  // Larger pieces first so they sit behind smaller ones.
+  const sorted = [...opts.pieces].sort(
+    (a, b) => b.bbox.w * b.bbox.h - a.bbox.w * a.bbox.h
+  );
+
+  for (const piece of sorted) {
+    const w = Math.max(piece.bbox.w * scale, 12);
+    const h = Math.max(piece.bbox.h * scale, 12);
+    const assetId = AssetRecordType.createId();
+    editor.createAssets([
+      {
+        id: assetId,
+        typeName: "asset",
+        type: "image",
+        props: {
+          name: piece.label,
+          src: piece.url,
+          w,
+          h,
+          mimeType: "image/png",
+          isAnimated: false,
+        },
+        meta: {},
+      },
+    ]);
     editor.createShape({
       id: createShapeId(),
-      type: "text",
-      x: 0,
-      y: -80 - scene.scale_anchors.length * 22,
-      props: {
-        richText: toRichText(
-          ["SCALE", ...scene.scale_anchors.map((a) => `· ${a}`)].join("\n")
-        ),
-        color: "grey",
-        size: "s",
-        font: "mono",
-        autoSize: true,
+      type: "image",
+      x: piece.bbox.x * scale,
+      y: piece.bbox.y * scale,
+      props: { assetId, w, h },
+      meta: {
+        label: piece.label,
+        kind: piece.kind,
+        mobile: piece.mobile,
+        source: "scene-cutout",
       },
-      meta: { source: "scene-translation", label: "scale legend" },
     });
+    if (opts.animate !== false) {
+      editor.zoomToFit({ animation: { duration: 120 } });
+      await new Promise((r) => setTimeout(r, 90));
+    }
   }
 
+  addScaleLegend(editor, opts.scene);
   editor.zoomToFit({ animation: { duration: 300 } });
+}
+
+/** Upload a blob to Vercel Blob without creating an asset row. */
+export async function uploadBlobOnly(
+  blob: Blob,
+  pathname: string
+): Promise<string> {
+  const uploaded = await upload(pathname, blob, {
+    access: "public",
+    handleUploadUrl: "/api/blob/upload",
+  });
+  return uploaded.url;
 }
 
 /** Export the current page (or selection) as a PNG blob. */
