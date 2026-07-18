@@ -469,21 +469,22 @@ export default function CanvasPanel({
           <button
             onClick={translateScene}
             disabled={!!busy || !project?.reference_image_url}
-            className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background disabled:opacity-40"
+            className="whitespace-nowrap border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background disabled:opacity-40"
             title="Translate the reference image into movable objects"
           >
-            ✦ Scene from image
+            ✦ Scene
           </button>
           <button
             onClick={screenshotToAsset}
             disabled={!!busy}
-            className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border disabled:opacity-40"
+            className="whitespace-nowrap border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border disabled:opacity-40"
+            title="Save the current canvas as a shot"
           >
-            Save shot
+            Save
           </button>
           <button
             onClick={() => editorRef.current && clearCanvas(editorRef.current)}
-            className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted hover:border-border"
+            className="whitespace-nowrap border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted hover:border-border"
           >
             Clear
           </button>
