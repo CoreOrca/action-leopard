@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { useWorkspace } from "@/lib/store";
 import { useShotScope } from "@/lib/shot-scope";
 import { saveBlobAsAsset } from "@/lib/canvas";
+import { desktopDragProps, downloadAsset } from "@/lib/download";
 
 export default function PreviewPanel({
   projectId,
@@ -116,15 +117,13 @@ export default function PreviewPanel({
                 </button>
               </>
             )}
-            <a
-              href={selected.url}
-              download
-              target="_blank"
-              rel="noreferrer"
+            <button
+              onClick={() => downloadAsset(selected.url)}
               className="inline-flex items-center border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border"
+              title="Save to disk (images can also be dragged straight to your desktop)"
             >
               Download
-            </a>
+            </button>
           </div>
         )}
       </div>
@@ -149,6 +148,7 @@ export default function PreviewPanel({
             src={selected.url}
             alt={selected.prompt ?? "asset"}
             className="max-h-full max-w-full object-contain"
+            {...desktopDragProps(selected.url)}
           />
         )}
       </div>

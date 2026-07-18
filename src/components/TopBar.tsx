@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { createNewProject } from "@/lib/projects";
+import { createNewProject, setProjectArchived } from "@/lib/projects";
 import { IMAGE_MODELS, VIDEO_MODELS } from "@/lib/models";
 import { useWorkspace } from "@/lib/store";
-import type { ProjectType } from "@/lib/types";
+import type { Project, ProjectType } from "@/lib/types";
 
 export default function TopBar({
   onPatchProject,
@@ -20,6 +20,24 @@ export default function TopBar({
   const [menuOpen, setMenuOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  const [projectList, setProjectList] = useState<Project[]>([]);
+
+  // Load the switcher list whenever the drawer opens.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    createClient()
+      .from("projects")
+      .select("id, name, project_type, archived, updated_at")
+      .eq("archived", false)
+      .order("updated_at", { ascending: false })
+      .limit(30)
+      .then(({ data }) => setProjectList((data as Project[]) ?? []));
+  }, [drawerOpen]);
+
+  async function archiveFromDrawer(id: string) {
+    await setProjectArchived(id, true);
+    setProjectList((l) => l.filter((p) => p.id !== id));
+  }
   const [dark, setDark] = useState(true);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -196,8 +214,45 @@ export default function TopBar({
               </button>
             </>
           )}
-          <div className="px-4 py-3 font-mono text-[10px] uppercase tracking-wider text-muted">
-            {project?.name}
+          <div className="border-b border-border-soft px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-muted">
+            Switch project
+          </div>
+          <div className="max-h-[calc(100vh-20rem)] overflow-y-auto">
+            {projectList.map((p) => (
+              <div
+                key={p.id}
+                className={`group flex items-center border-b border-border-soft ${
+                  p.id === project?.id ? "bg-panel" : ""
+                }`}
+              >
+                <Link
+                  href={`/studio/${p.id}`}
+                  onClick={() => setDrawerOpen(false)}
+                  className="min-w-0 flex-1 px-4 py-2 hover:bg-foreground hover:text-background"
+                >
+                  <span className="block truncate text-xs">
+                    {p.name}
+                    {p.project_type === "scene" && (
+                      <span className="ml-2 font-mono text-[9px] uppercase tracking-wider opacity-60">
+                        scene
+                      </span>
+                    )}
+                  </span>
+                </Link>
+                <button
+                  onClick={() => archiveFromDrawer(p.id)}
+                  className="hidden px-2 py-2 font-mono text-[9px] uppercase tracking-wider text-muted hover:text-danger group-hover:block"
+                  title="Archive (find it later under Projects → Archived)"
+                >
+                  Arch
+                </button>
+              </div>
+            ))}
+            {projectList.length === 0 && (
+              <p className="px-4 py-3 font-mono text-[10px] text-muted">
+                No projects yet.
+              </p>
+            )}
           </div>
         </nav>
       )}

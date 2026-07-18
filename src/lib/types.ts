@@ -40,6 +40,7 @@ export interface Project {
   project_type: ProjectType;
   script: string;
   location_map: LocationMapEntry[];
+  archived: boolean;
   created_at: string;
   updated_at: string;
 }

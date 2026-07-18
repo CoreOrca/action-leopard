@@ -3,7 +3,11 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { createNewProject } from "@/lib/projects";
+import {
+  createNewProject,
+  duplicateProject,
+  setProjectArchived,
+} from "@/lib/projects";
 import type { Project, ProjectType } from "@/lib/types";
 
 export default function StudioPage() {
@@ -12,6 +16,8 @@ export default function StudioPage() {
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState<string>("");
   const [chooserOpen, setChooserOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [duplicating, setDuplicating] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
@@ -39,6 +45,24 @@ export default function StudioPage() {
     setProjects((p) => p.filter((x) => x.id !== id));
   }
 
+  async function toggleArchived(p: Project) {
+    await setProjectArchived(p.id, !p.archived);
+    setProjects((list) =>
+      list.map((x) => (x.id === p.id ? { ...x, archived: !p.archived } : x))
+    );
+  }
+
+  async function duplicate(id: string) {
+    setDuplicating(id);
+    try {
+      const newId = await duplicateProject(id);
+      if (newId) router.push(`/studio/${newId}`);
+      else alert("Duplicate failed");
+    } finally {
+      setDuplicating(null);
+    }
+  }
+
   async function signOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -63,9 +87,21 @@ export default function StudioPage() {
 
       <div className="mx-auto max-w-3xl px-6 py-12">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="font-mono text-sm uppercase tracking-widest text-muted">
-            Projects
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="font-mono text-sm uppercase tracking-widest text-muted">
+              Projects
+            </h1>
+            <button
+              onClick={() => setShowArchived((v) => !v)}
+              className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-wider ${
+                showArchived
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border-soft text-muted hover:border-border"
+              }`}
+            >
+              Archived
+            </button>
+          </div>
           <div className="relative">
             <button
               onClick={() => setChooserOpen((o) => !o)}
@@ -106,7 +142,9 @@ export default function StudioPage() {
           </p>
         ) : (
           <ul className="divide-y divide-border-soft border border-border-soft">
-            {projects.map((p) => (
+            {projects
+              .filter((p) => !!p.archived === showArchived)
+              .map((p) => (
               <li
                 key={p.id}
                 className="flex items-center justify-between px-4 py-3 hover:bg-panel cursor-pointer group"
@@ -125,15 +163,37 @@ export default function StudioPage() {
                     {new Date(p.updated_at).toLocaleString()}
                   </div>
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteProject(p.id);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 font-mono text-[10px] uppercase text-danger border border-danger px-2 py-1"
-                >
-                  Delete
-                </button>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      duplicate(p.id);
+                    }}
+                    disabled={duplicating === p.id}
+                    className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase hover:border-border disabled:opacity-40"
+                    title="Copy intent, script, art direction, locations, and elements into a new project"
+                  >
+                    {duplicating === p.id ? "…" : "Duplicate"}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleArchived(p);
+                    }}
+                    className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase hover:border-border"
+                  >
+                    {p.archived ? "Unarchive" : "Archive"}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteProject(p.id);
+                    }}
+                    className="border border-danger px-2 py-1 font-mono text-[10px] uppercase text-danger"
+                  >
+                    Delete
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

@@ -5,6 +5,7 @@ import { useWorkspace } from "@/lib/store";
 import { useSceneAgent } from "@/lib/scene-store";
 import { insertShot, patchShot, deleteShot, reorderShots } from "@/lib/shots";
 import { saveBlobAsAsset } from "@/lib/canvas";
+import { desktopDragProps, downloadAsset } from "@/lib/download";
 import type { Shot } from "@/lib/types";
 
 const COLS = 4;
@@ -293,8 +294,8 @@ export default function ShotsCanvas({
                     src={url}
                     alt={shot.title || `Shot ${i + 1}`}
                     className="h-full w-full object-cover"
-                    draggable={false}
                     loading="lazy"
+                    {...desktopDragProps(url, `shot-${i + 1}.png`)}
                   />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center border border-dashed border-border-soft">
@@ -330,16 +331,30 @@ export default function ShotsCanvas({
                     ▶
                   </span>
                 )}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeShotFully(shot.id);
-                  }}
-                  className="absolute right-1.5 top-1.5 hidden border border-border-soft bg-background px-1.5 py-0.5 font-mono text-[10px] hover:border-danger hover:text-danger group-hover:block"
-                  title="Delete shot"
-                >
-                  ×
-                </button>
+                <div className="absolute right-1.5 top-1.5 hidden gap-1 group-hover:flex">
+                  {url && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadAsset(url, `shot-${i + 1}.png`);
+                      }}
+                      className="border border-border-soft bg-background px-1.5 py-0.5 font-mono text-[10px] hover:border-border"
+                      title="Download this frame (or drag the image to your desktop)"
+                    >
+                      ⤓
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeShotFully(shot.id);
+                    }}
+                    className="border border-border-soft bg-background px-1.5 py-0.5 font-mono text-[10px] hover:border-danger hover:text-danger"
+                    title="Delete shot"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
             );
           })}
