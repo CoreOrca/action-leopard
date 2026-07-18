@@ -145,7 +145,7 @@ export default function PreviewPanel({
         )}
       </div>
 
-      <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-border-soft px-1">
+      <div className="flex h-16 min-w-0 shrink-0 items-center gap-1 overflow-x-auto border-t border-border-soft px-1">
         <button
           onClick={() => uploadInput.current?.click()}
           className="flex h-12 w-10 shrink-0 items-center justify-center border border-dashed border-border-soft font-mono text-sm text-muted hover:border-border hover:text-foreground"

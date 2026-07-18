@@ -451,19 +451,21 @@ export default function CanvasPanel({
             <option value="outlines">Outlines</option>
             <option value="blocks">Blocks</option>
           </select>
-          {showQuality && (
-            <select
-              value={sceneQuality}
-              onChange={(e) =>
-                setSceneQuality(e.target.value as SceneQuality)
-              }
-              className="border border-border-soft bg-background px-1 py-1 font-mono text-[10px] uppercase outline-none hover:border-border"
-              title="Fast: SAM stickers. Cinematic: image-model atlas + empty plate when subjects are present (uses image credits)."
-            >
-              <option value="cinematic">Cinematic</option>
-              <option value="fast">Fast</option>
-            </select>
-          )}
+          <select
+            value={sceneQuality}
+            onChange={(e) => setSceneQuality(e.target.value as SceneQuality)}
+            disabled={!showQuality}
+            aria-hidden={!showQuality}
+            className="border border-border-soft bg-background px-1 py-1 font-mono text-[10px] uppercase outline-none hover:border-border disabled:cursor-default disabled:border-border-soft disabled:text-muted disabled:opacity-40 disabled:hover:border-border-soft"
+            title={
+              showQuality
+                ? "Fast: SAM stickers. Cinematic: image-model atlas + empty plate when subjects are present (uses image credits)."
+                : "Quality applies to Cutouts mode only."
+            }
+          >
+            <option value="cinematic">Cinematic</option>
+            <option value="fast">Fast</option>
+          </select>
           <button
             onClick={translateScene}
             disabled={!!busy || !project?.reference_image_url}
@@ -488,7 +490,10 @@ export default function CanvasPanel({
         </div>
       </div>
       <div className="isolate relative z-0 min-h-0 flex-1">
-        <Tldraw onMount={handleMount} />
+        <Tldraw
+          licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
+          onMount={handleMount}
+        />
       </div>
     </section>
   );

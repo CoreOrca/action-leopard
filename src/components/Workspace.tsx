@@ -95,11 +95,11 @@ export default function Workspace({ projectId }: { projectId: string }) {
     <main className="flex h-screen flex-col bg-background text-foreground">
       <TopBar onPatchProject={patchProject} />
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1">
         <SidePanel projectId={projectId} onPatchProject={patchProject} />
 
-        <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
-          <div className="flex min-h-0 flex-1 gap-2">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2">
+          <div className="flex min-h-0 min-w-0 flex-1 gap-2">
             <CanvasPanel
               projectId={projectId}
               onEditorReady={setEditor}
