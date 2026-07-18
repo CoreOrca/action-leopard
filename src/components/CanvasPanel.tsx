@@ -436,10 +436,10 @@ export default function CanvasPanel({
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col border border-border-soft">
       <div className="flex items-center justify-between border-b border-border-soft px-2 py-1">
-        <span className="font-mono text-[10px] uppercase tracking-widest text-muted">
+        <span className="min-w-0 font-mono text-[10px] uppercase tracking-widest text-muted">
           Canvas — blocking &amp; sketch
         </span>
-        <div className="flex gap-1">
+        <div className="flex shrink-0 gap-1">
           <select
             value={sceneMode}
             onChange={(e) => setSceneMode(e.target.value as SceneMode)}
@@ -469,7 +469,7 @@ export default function CanvasPanel({
           <button
             onClick={translateScene}
             disabled={!!busy || !project?.reference_image_url}
-            className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background disabled:opacity-40"
+            className="whitespace-nowrap border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background disabled:opacity-40"
             title="Translate the reference image into movable objects"
           >
             ✦ Scene from image
@@ -477,13 +477,13 @@ export default function CanvasPanel({
           <button
             onClick={screenshotToAsset}
             disabled={!!busy}
-            className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border disabled:opacity-40"
+            className="whitespace-nowrap border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border disabled:opacity-40"
           >
             Save shot
           </button>
           <button
             onClick={() => editorRef.current && clearCanvas(editorRef.current)}
-            className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted hover:border-border"
+            className="whitespace-nowrap border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted hover:border-border"
           >
             Clear
           </button>
