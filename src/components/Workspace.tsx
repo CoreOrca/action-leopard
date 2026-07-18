@@ -15,6 +15,8 @@ import PromptBar from "./PromptBar";
 import VideoStrip from "./VideoStrip";
 import AgentModal from "./AgentModal";
 import ShotsCanvas from "./ShotsCanvas";
+import SceneAgentPanel from "./SceneAgentPanel";
+import { planScene, computeResume } from "@/lib/scene-agent";
 
 export default function Workspace({ projectId }: { projectId: string }) {
   const {
@@ -53,7 +55,10 @@ export default function Workspace({ projectId }: { projectId: string }) {
       setProject((p.data as Project) ?? null);
       setElements((e.data as Element[]) ?? []);
       setAssets((a.data as Asset[]) ?? []);
-      useSceneAgent.getState().setShots((s.data as Shot[]) ?? []);
+      const shots = (s.data as Shot[]) ?? [];
+      useSceneAgent.getState().setShots(shots);
+      if ((p.data as Project)?.project_type === "scene")
+        useSceneAgent.getState().setPhase(computeResume(shots).phase);
       setLoaded(true);
     });
     return () => {
@@ -138,6 +143,7 @@ export default function Workspace({ projectId }: { projectId: string }) {
       )}
 
       <AgentModal projectId={projectId} editor={editor} />
+      {isScene && <SceneAgentPanel />}
     </main>
   );
 }
@@ -180,7 +186,7 @@ function SceneShotsPane({ projectId }: { projectId: string }) {
   const view = useSceneAgent((s) => s.view);
   return (
     <div className={view === "shots" ? "flex min-h-0 min-w-0 flex-1" : "hidden"}>
-      <ShotsCanvas projectId={projectId} />
+      <ShotsCanvas projectId={projectId} onImagesFromScript={() => planScene()} />
     </div>
   );
 }

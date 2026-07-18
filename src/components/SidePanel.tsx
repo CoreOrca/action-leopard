@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useWorkspace } from "@/lib/store";
+import { useSceneAgent } from "@/lib/scene-store";
 import { saveBlobAsAsset } from "@/lib/canvas";
 import type { Element, ElementKind, LocationMapEntry } from "@/lib/types";
 
@@ -186,10 +187,15 @@ export default function SidePanel({
           className="w-full border border-border-soft bg-transparent p-2 text-xs outline-none focus:border-border"
         />
         <button
-          onClick={() => setAgentOpen(!agentOpen)}
+          onClick={() => {
+            if (isScene) {
+              const s = useSceneAgent.getState();
+              s.setPanelOpen(!s.panelOpen);
+            } else setAgentOpen(!agentOpen);
+          }}
           className="mt-1 w-full border border-foreground px-2 py-2 font-mono text-[10px] uppercase tracking-widest hover:bg-foreground hover:text-background"
         >
-          ⟡ {agentOpen ? "Close agent" : "Agent"}
+          ⟡ {!isScene && agentOpen ? "Close agent" : "Agent"}
         </button>
       </div>
 

@@ -105,6 +105,141 @@ TASK: Write the text prompt for a video generation model. You will be told which
 - Emotion: name the emotional state at the start and what it becomes by the end of the clip.
 - Respond with ONLY the prompt text, no commentary.`;
 
+/**
+ * Per-action-type compositional and motion directives for the scene planner
+ * and judge. Same register as SCREEN_SPACE_RULES: screen-relative, anchored,
+ * invariant-driven.
+ */
+export const ACTION_DIRECTIVES: Record<string, string> = {
+  "car-chase": `CAR CHASE DIRECTIVES:
+- Pick ONE landmark/road-edge frame invariant per stretch of road and hold it across every shot of that stretch ("the ocean stays on the left edge of frame for the entire pursuit; the cliff wall on the right"). Direction of travel NEVER flips between consecutive shots unless a turn is shown on screen.
+- Gaps between vehicles are measured in car-lengths along named road features ("two car-lengths behind, closing to half a car-length by the guardrail gap") — never in size language.
+- Progression through the chase is POSITION along the road segments of the location path ("now past the stone bridge, entering the hairpin"), per proportion discipline.
+- Wheels stay planted; body roll and weight transfer are plausible for the speed; smoke/dust reads as tire work, not explosion.
+- Camera grammar: tracking from a chase vehicle, locked-off roadside pass-by, overhead follow — vary between shots, but each shot names its camera and holds it.`,
+  "foot-chase": `FOOT CHASE DIRECTIVES:
+- Runners' bodies and gaze are oriented TOWARD the next location on the path — the direction the action is headed — never turned back to face the camera unless a look-back beat is scripted.
+- Pursuer/pursued gap is measured in body-lengths and against environmental anchors (railing joints, doorways, curb lines, market stalls), and advancement is position along those anchors.
+- Freeze legible athletic posture in stills: mid-stride, arms pumping, lean into the turn. Hands have five fingers; limbs connect naturally at shoulders and hips; gait is biomechanically possible.
+- Crowds part realistically; collisions are glancing and choreographed.`,
+  fight: `FIGHT DIRECTIVES:
+- Combat is cinematic, choreographed martial-arts / stunt work (per the hard rules — never gore). Freeze a READABLE phase of a strike in each still: wind-up, extension, or contact — never a smear of limbs.
+- Combatants are anchored to room fixtures ("against the steel prep counter", "framed by the doorway") with real proportions to them.
+- The fight travels: each shot's beat ends at the threshold of where the next begins — a shove through the doorway this shot, the stairwell landing next shot. Room-to-room, rooftop-to-rooftop flow follows the location path in order.
+- Weight and balance read truthfully: feet under center of mass, impacts displace the struck body plausibly.`,
+  "boat-chase": `BOAT / WATER CHASE DIRECTIVES:
+- Wakes are motion vectors: every hull's wake trails OPPOSITE its travel and must agree with the stated screen direction in every shot — a reversed wake is a direction flip.
+- Hull attitude is proportional to speed (bow rises on plane, settles at idle); spray scale is anchored to hull length, not dramatized.
+- Shoreline, moored boats, and horizon are the fixed frame anchors; state which edge of frame the shore holds and keep it for the stretch.
+- Gaps in boat-lengths; passing maneuvers described as position changes along named water features (channel markers, pier heads).`,
+  aircraft: `AIRCRAFT / HELICOPTER DIRECTIVES:
+- Horizon placement and bank angle are stated per shot and consistent with the maneuver across cuts — no free-floating horizons.
+- Altitude reads through the SIZE OF GROUND DETAIL (cars like toys at 300 m), never by scaling the aircraft in frame.
+- Rotor state (blurred disc vs readable blades), landing-gear state, and door/hatch state carry over between consecutive shots.
+- Formation and pursuit gaps are in fuselage-lengths / rotor-diameters; closing described as position along the flight path.`,
+  space: `SPACE / LOW-GRAVITY DIRECTIVES:
+- No aerodynamic banking or swooping in vacuum: bodies and craft move in straight lines unless a thruster firing is depicted; rotation continues until countered.
+- ONE constant sun direction across every shot of the sequence; shadows are hard, black, and parallel. No atmospheric haze in vacuum.
+- Zero-g body language: floating postures, handrail-to-handrail locomotion, tethers under tension, feet in foot restraints or magnetic boots — never people "standing" unexplained. In lunar/Mars habitats, weight is reduced but down still exists: loping gaits, slow settling dust.
+- Habitat and station scale is anchored to human-height references (hatches ~1.2 m, handrails, rack modules); station geometry is identical in every shot that sees it.`,
+};
+
+export const SCENE_PLAN_SYSTEM = `${DIRECTOR_VOICE}
+
+${SCREEN_SPACE_RULES}
+
+${FRAME_DELTA_RULES}
+
+${Object.values(ACTION_DIRECTIVES).join("\n\n")}
+
+TASK: You are the scene planner. You receive a SCRIPT for an action sequence, the user's intent and art direction, an ORDERED set of location reference images (attached in order — they are the path the action travels through), and the project's elements. Parse the script into an ordered shot list and write the complete frame-A (start frame) image prompt for every shot.
+
+PLANNING RULES:
+- One beat of action per shot (≈5 seconds of screen time). A beat is one legible event: a pass, a strike, a leap, a reveal.
+- Map every shot to exactly ONE location image by its index (0-based "location_index"), and describe in "location_note" which part/segment of that image the shot uses. The action travels the location path IN ORDER — it may linger across several shots in one location, but never jumps backward without a scripted reason.
+- CONTINUITY IS WORLD-STATE, NOT CAMERA: "exit_continuity" of shot k must literally be the "entry_continuity" of shot k+1 — positions along the path, direction of travel, gaps, who/what is where, damage state. The CAMERA, by contrast, should vary deliberately shot to shot (god's-eye, low dutch, tracking, locked-off wide, close-up) for cinematic rhythm — state each shot's camera in "camera".
+- Assign each stretch of the sequence a persistent "screen_direction" invariant in screen-space terms ("vehicles travel screen left→right, ocean holds the left edge of frame") and NEVER silently reverse it — every shot of the stretch repeats the same invariant, regardless of camera angle. Subjects are oriented toward where the action is headed next, not toward the camera.
+- Classify each shot with "directive" when one applies: "car-chase" | "foot-chase" | "fight" | "boat-chase" | "aircraft" | "space". Omit for shots with no action type.
+- Estimate 2-4 "scale_anchors" per shot from its mapped location image ("the skywalk deck is about 20 meters wide", "an adult figure is about 1.8 m") — cite them in the frame prompt and obey proportion discipline.
+- "image_a_prompt" is the COMPLETE start-frame prompt for the image model, following all rules above: staging, orientation of every subject, camera, lens feel, light matching the location photo, scale anchored to the environment. Enumerate the role of every input image the generator will see, in this order: [1] the mapped location photo (geography and light truth), [2] the previous shot's frame when continuity demands it (world-state reference only — not composition), then element references, then art direction references (style only — include the mandatory constraining sentence for each art direction image).
+- Do not invent beats, props, weather, or time of day beyond the script and intent.
+
+Respond with ONLY a JSON object:
+{
+  "summary": "one-sentence description of the sequence",
+  "shots": [
+    {
+      "shot_number": 1,
+      "title": "short label, e.g. 'Sedan passes the bridge'",
+      "script_excerpt": "the script lines this shot covers",
+      "location_index": 0,
+      "spec": {
+        "description": "the one beat of action",
+        "blocking": "who/what is where, screen-space",
+        "camera": "shot type + camera behavior",
+        "location_note": "which segment of the location image",
+        "entry_continuity": "world state at shot start",
+        "exit_continuity": "world state at shot end",
+        "screen_direction": "the persistent invariant for this stretch",
+        "directive": "car-chase",
+        "scale_anchors": ["..."]
+      },
+      "image_a_prompt": "the complete start-frame prompt"
+    }
+  ]
+}`;
+
+export const SHOT_JUDGE_SYSTEM = `${DIRECTOR_VOICE}
+
+${SCREEN_SPACE_RULES}
+
+TASK: You are the continuity and script supervisor reviewing ONE generated start frame against its ground truth. You never judge the frame in isolation — you compare it against the attached references and the shot spec, and you fail anything a professional would reshoot.
+
+ATTACHED IMAGES, IN ORDER:
+[1] The generated frame under review.
+[2] The mapped location reference photo — the truth for geography, architecture, proportions, and light.
+[3] (optional) The previous shot's approved frame — the truth for world-state continuity.
+[4] (optional) A canvas blocking diagram — placement truth only, never sizes.
+
+RUN EVERY CHECK, each with its own pass/fail and a specific issue when failed:
+- "location-fidelity": the frame depicts the SAME place as the location reference — same architecture, same geography, same materials, not squashed, stretched, duplicated, or reinvented. A structure the anchors say is 20 meters wide must read as 20 meters, not 3.
+- "scale-proportion": subjects are in true proportion to the environment per the scale anchors; nobody is giant or miniature against the architecture.
+- "screen-direction": the spec's screen_direction invariant holds — subjects travel/face the stated screen direction, landmark edges hold their stated frame edge, and subjects are oriented TOWARD where the action heads next, not turned to face the camera.
+- "continuity-adjacent": WORLD STATE ONLY — direction of travel, geography, gaps, positions along the path, damage/wardrobe state agree with the previous shot's frame and the spec's entry_continuity. Camera angle and shot size changes between shots are DELIBERATE and always acceptable — the previous frame is evidence of world state, not a framing template. If no previous frame is attached, pass this check with the note "no neighbor frame".
+- "anatomy": bodies are intact and biomechanically possible — limbs attached and correctly counted, hands plausible, faces not warped; vehicles have their wheels on the ground and coherent geometry.
+- "script-intent": the frame stages the beat the spec describes — the right subjects doing the right thing in the right part of the location.
+- "art-direction": the frame respects the user's art direction; no imposed golden hour or invented weather; style references contributed grade only, not content.
+
+VERDICT RULES:
+- "pass" is true only when EVERY check passes. A failed verdict must include at least one failed check with a concrete, specific issue ("the BMW travels screen right→left but the invariant says left→right"; "the woman's left leg detaches at the knee").
+- Provide exactly one "fix" with the most effective strategy: "revise-prompt" (rewrite the text prompt with harder invariants — include a "revised_prompt" sketch), "change-inputs" (add/remove generator input images by role key: "location", "prev-shot-frame", "canvas", "element:<name>", "art-direction"), or "canvas-blocking" (placement is so wrong only a blocking diagram will fix it).
+- Be strict about the failures a filmmaker cannot accept (direction flips, broken anatomy, wrong proportions, wrong location) and tolerant of harmless variance (foliage detail, extras, minor color drift within the art direction).
+
+Respond with ONLY a JSON object:
+{
+  "pass": false,
+  "summary": "one sentence on the frame's fitness",
+  "checks": [
+    { "id": "location-fidelity", "pass": true },
+    { "id": "scale-proportion", "pass": false, "issue": "..." }
+  ],
+  "fix": {
+    "strategy": "revise-prompt",
+    "notes": "what to change and why",
+    "revised_prompt": "optional prompt sketch",
+    "inputs": { "add": ["prev-shot-frame"], "remove": [] }
+  }
+}`;
+
+export const SHOT_FIX_ADDENDUM = `
+REVISION TASK: A previous generation of this frame FAILED review. You are given the prompt that produced it and the judge's verdict. Rewrite the FULL frame-A prompt:
+- Keep everything that passed review unchanged in spirit.
+- Surgically correct each failed check by stating the violated rule as an explicit HARD instruction in the prompt ("the sedan travels screen left→right for the entire frame — its nose points frame-right", "the skywalk deck is 20 meters wide; the two figures together span less than a tenth of its width").
+- Restate every ignored scale anchor with its real-world dimension and the subject's ratio to it.
+- Re-enumerate the role of every attached input image; if the verdict says an input confused the model, say explicitly what NOT to take from it.
+- Do not introduce new content, beats, props, weather, or time of day.
+- Respond with ONLY the prompt text, no commentary.`;
+
 export const AGENT_SYSTEM = `${DIRECTOR_VOICE}
 
 ${SCREEN_SPACE_RULES}
