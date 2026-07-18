@@ -66,11 +66,11 @@ export default function PreviewPanel({
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col border border-border-soft">
       <div className="flex items-center justify-between border-b border-border-soft px-2 py-1">
-        <span className="min-w-0 font-mono text-[10px] uppercase tracking-widest text-muted">
+        <span className="font-mono text-[10px] uppercase tracking-widest text-muted">
           Preview — framed shot / assets
         </span>
         {selected && (
-          <div className="flex shrink-0 gap-1">
+          <div className="flex gap-1">
             {selected.type !== "video" && (
               <>
                 <button
@@ -79,7 +79,7 @@ export default function PreviewPanel({
                       startFrameId === selected.id ? null : selected.id
                     )
                   }
-                  className={`whitespace-nowrap border px-2 py-1 font-mono text-[10px] uppercase tracking-wider ${
+                  className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-wider ${
                     startFrameId === selected.id
                       ? "border-foreground bg-foreground text-background"
                       : "border-border-soft hover:border-border"
@@ -91,7 +91,7 @@ export default function PreviewPanel({
                   onClick={() =>
                     setEndFrame(endFrameId === selected.id ? null : selected.id)
                   }
-                  className={`whitespace-nowrap border px-2 py-1 font-mono text-[10px] uppercase tracking-wider ${
+                  className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-wider ${
                     endFrameId === selected.id
                       ? "border-foreground bg-foreground text-background"
                       : "border-border-soft hover:border-border"
@@ -101,7 +101,7 @@ export default function PreviewPanel({
                 </button>
                 <button
                   onClick={() => onAnnotate(selected.url)}
-                  className="whitespace-nowrap border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border"
+                  className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border"
                   title="Place on canvas and draw over it"
                 >
                   Annotate
@@ -113,7 +113,7 @@ export default function PreviewPanel({
               download
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center whitespace-nowrap border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border"
+              className="inline-flex items-center border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border"
             >
               Download
             </a>
