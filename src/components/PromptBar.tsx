@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useWorkspace } from "@/lib/store";
+import { useShotScope } from "@/lib/shot-scope";
 import { getVideoModel } from "@/lib/models";
 
 type PromptTab = "image_a" | "image_b" | "video";
@@ -33,21 +34,19 @@ export default function PromptBar({
 }) {
   const {
     project,
-    patchProject,
     elements,
     assets,
     addAssets,
-    startFrameId,
-    endFrameId,
     busy,
     setBusy,
   } = useWorkspace();
+  const scope = useShotScope(onPatchProject);
   const [seconds, setSeconds] = useState(5);
   const [tab, setTab] = useState<PromptTab>("image_a");
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
 
-  const startFrame = assets.find((a) => a.id === startFrameId);
-  const endFrame = assets.find((a) => a.id === endFrameId);
+  const startFrame = assets.find((a) => a.id === scope.startFrameId);
+  const endFrame = assets.find((a) => a.id === scope.endFrameId);
   const latestCanvasShot = [...assets]
     .reverse()
     .find((a) => a.type === "canvas-shot");
@@ -72,10 +71,10 @@ export default function PromptBar({
     } else if (startFrame) {
       list.push({ key: "frame-a", url: startFrame.url, role: "frame A (start)" });
     }
-    if (project?.reference_image_url)
+    if (scope.referenceUrl)
       list.push({
         key: "reference",
-        url: project.reference_image_url,
+        url: scope.referenceUrl,
         role: "location reference",
       });
     if (latestCanvasShot)
@@ -92,19 +91,17 @@ export default function PromptBar({
       })
     );
     return list;
-  }, [tab, startFrame, endFrame, project?.reference_image_url, latestCanvasShot, artDirectionImages]);
+  }, [tab, startFrame, endFrame, scope.referenceUrl, latestCanvasShot, artDirectionImages]);
 
   const activeInputs = candidates.filter((c) => !excluded.has(c.key));
 
   if (!project) return null;
 
-  const promptText = project.prompts?.[tab] ?? "";
+  const promptText = scope.prompts?.[tab] ?? "";
 
   function setPromptText(text: string) {
     if (!project) return;
-    const prompts = { ...project.prompts, [tab]: text };
-    patchProject({ prompts });
-    onPatchProject({ prompts });
+    scope.setPrompts({ ...scope.prompts, [tab]: text });
   }
 
   async function writePrompt() {
@@ -116,7 +113,7 @@ export default function PromptBar({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: TAB_MODE[tab],
-          intent: project.intent,
+          intent: scope.intent,
           artDirection: project.art_direction,
           elements: elements.map((e) => ({
             kind: e.kind,
@@ -124,10 +121,10 @@ export default function PromptBar({
             notes: e.notes,
           })),
           imageUrls: activeInputs.map((i) => ({ url: i.url, role: i.role })),
-          frameAPrompt: project.prompts?.image_a ?? startFrame?.prompt ?? "",
+          frameAPrompt: scope.prompts?.image_a ?? startFrame?.prompt ?? "",
           videoModel: project.video_model,
           seconds,
-          sceneMeta: project.scene_meta,
+          sceneMeta: scope.sceneMeta,
         }),
       });
       const data = await res.json();
@@ -165,6 +162,7 @@ export default function PromptBar({
           imageUrls: activeInputs.map((i) => i.url),
           modelId: project.image_model,
           aspectRatio: "16:9",
+          metadata: scope.genMetadata(tab === "image_b" ? "end" : "start"),
         }),
       });
       const data = await res.json();
@@ -179,7 +177,7 @@ export default function PromptBar({
 
   async function generateVideo() {
     if (!project) return;
-    const videoPrompt = project.prompts?.video ?? "";
+    const videoPrompt = scope.prompts?.video ?? "";
     if (!videoPrompt.trim()) {
       alert("Write the video prompt first (Video tab).");
       return;
@@ -205,11 +203,13 @@ export default function PromptBar({
           endImageUrl:
             videoModel.supportsEndFrame && endFrame ? endFrame.url : undefined,
           duration: seconds,
+          metadata: scope.genMetadata("video"),
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "generation failed");
       addAssets([data.asset]);
+      scope.assignVideo(data.asset.id);
     } catch (e) {
       alert((e as Error).message);
     } finally {
@@ -232,7 +232,7 @@ export default function PromptBar({
               }`}
             >
               {TAB_LABEL[t]}
-              {project.prompts?.[t] ? " ●" : ""}
+              {scope.prompts?.[t] ? " ●" : ""}
             </button>
           ))}
           <span className="ml-3 font-mono text-[10px] text-muted">

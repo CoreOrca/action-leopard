@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { useWorkspace } from "@/lib/store";
+import { useShotScope } from "@/lib/shot-scope";
 import { saveBlobAsAsset } from "@/lib/canvas";
 
 export default function PreviewPanel({
@@ -15,14 +16,19 @@ export default function PreviewPanel({
     assets,
     selectedAssetId,
     select,
-    startFrameId,
-    endFrameId,
-    setStartFrame,
-    setEndFrame,
     addAssets,
     removeAsset,
     setBusy,
   } = useWorkspace();
+  const {
+    scoped,
+    shot,
+    startFrameId,
+    endFrameId,
+    setStartFrame,
+    setEndFrame,
+    filterAssets,
+  } = useShotScope();
   const uploadInput = useRef<HTMLInputElement>(null);
 
   async function uploadImage(file: File) {
@@ -32,7 +38,10 @@ export default function PreviewPanel({
         projectId,
         type: "image",
         pathname: `projects/${projectId}/uploads/${file.name}`,
-        metadata: { source: "user-upload" },
+        metadata: {
+          source: "user-upload",
+          ...(shot ? { shot_id: shot.id } : {}),
+        },
       });
       addAssets([asset]);
     } catch (e) {
@@ -52,16 +61,15 @@ export default function PreviewPanel({
     });
   }
 
+  const images = filterAssets(assets);
+
   const selected =
     assets.find((a) => a.id === selectedAssetId) ??
-    [...assets].reverse().find((a) => a.type === "image") ??
-    assets[assets.length - 1];
-
-  const images = assets.filter((a) =>
-    ["image", "canvas-shot", "drawing", "reference", "art-direction"].includes(
-      a.type
-    )
-  );
+    (scoped
+      ? [...images].reverse().find((a) => a.type === "image") ??
+        images[images.length - 1]
+      : [...assets].reverse().find((a) => a.type === "image") ??
+        assets[assets.length - 1]);
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col border border-border-soft">
@@ -176,7 +184,11 @@ export default function PreviewPanel({
                   ? "border-foreground"
                   : "border-border-soft hover:border-border"
               }`}
-              title={`${a.type}${a.prompt ? ` — ${a.prompt.slice(0, 80)}` : ""}`}
+              title={`${a.type}${
+                typeof a.metadata?.version === "number"
+                  ? ` · v${a.metadata.version}`
+                  : ""
+              }${a.prompt ? ` — ${a.prompt.slice(0, 80)}` : ""}`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img

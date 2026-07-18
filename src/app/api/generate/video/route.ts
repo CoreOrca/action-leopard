@@ -5,8 +5,16 @@ export const maxDuration = 300;
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { projectId, prompt, modelId, startImageUrl, endImageUrl, videoUrl, duration } =
-    body;
+  const {
+    projectId,
+    prompt,
+    modelId,
+    startImageUrl,
+    endImageUrl,
+    videoUrl,
+    duration,
+    metadata,
+  } = body;
 
   if (!projectId || !startImageUrl) {
     return NextResponse.json(
@@ -24,6 +32,7 @@ export async function POST(request: Request) {
       endImageUrl,
       videoUrl,
       duration,
+      metadata,
     });
     return NextResponse.json({ asset });
   } catch (err) {

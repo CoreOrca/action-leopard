@@ -5,7 +5,7 @@ export const maxDuration = 300;
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { projectId, prompt, imageUrls, modelId, aspectRatio, resolution } = body;
+  const { projectId, prompt, imageUrls, modelId, aspectRatio, resolution, metadata } = body;
 
   if (!projectId || !prompt || !imageUrls?.length) {
     return NextResponse.json(
@@ -22,6 +22,7 @@ export async function POST(request: Request) {
       modelId: modelId ?? "nano-banana-pro",
       aspectRatio,
       resolution,
+      metadata,
     });
     return NextResponse.json({ assets });
   } catch (err) {

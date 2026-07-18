@@ -52,6 +52,8 @@ export async function generateImage(opts: {
   modelId: string;
   aspectRatio?: string;
   resolution?: "1K" | "2K" | "4K";
+  /** Extra metadata merged into the asset row (e.g. shot_id/shot_role/version). */
+  metadata?: Record<string, unknown>;
 }): Promise<Asset[]> {
   const model = getImageModel(opts.modelId);
   const result = await fal.subscribe(model.falId, {
@@ -85,6 +87,7 @@ export async function generateImage(opts: {
           height: img.height,
           description: output.description,
           input_images: opts.imageUrls,
+          ...(opts.metadata ?? {}),
         },
       })
     );
@@ -100,6 +103,8 @@ export async function generateVideo(opts: {
   endImageUrl?: string;
   videoUrl?: string;
   duration?: number;
+  /** Extra metadata merged into the asset row (e.g. shot_id/shot_role/version). */
+  metadata?: Record<string, unknown>;
 }): Promise<Asset> {
   const model = getVideoModel(opts.modelId);
 
@@ -171,6 +176,7 @@ export async function generateVideo(opts: {
       end_image_url: opts.endImageUrl ?? null,
       video_input_url: opts.videoUrl ?? null,
       duration: opts.duration ?? null,
+      ...(opts.metadata ?? {}),
     },
   });
 }
