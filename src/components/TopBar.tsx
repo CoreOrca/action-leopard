@@ -105,10 +105,21 @@ export default function TopBar({
 
         <button
           onClick={toggleTheme}
-          className="border border-border-soft px-2 py-1 font-mono text-[11px] uppercase hover:border-border"
-          title="Toggle theme"
+          className="flex h-7 w-7 items-center justify-center border border-border-soft hover:border-border"
+          title={dark ? "Switch to light mode" : "Switch to dark mode"}
         >
-          {dark ? "Light" : "Dark"}
+          {dark ? (
+            /* sun */
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" />
+            </svg>
+          ) : (
+            /* moon */
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+            </svg>
+          )}
         </button>
 
         <div className="relative" ref={menuRef}>
@@ -144,6 +155,12 @@ export default function TopBar({
             className="block border-b border-border-soft px-4 py-3 font-mono text-[11px] uppercase tracking-wider hover:bg-foreground hover:text-background"
           >
             ← All projects
+          </Link>
+          <Link
+            href="/studio/assets"
+            className="block border-b border-border-soft px-4 py-3 font-mono text-[11px] uppercase tracking-wider hover:bg-foreground hover:text-background"
+          >
+            Assets
           </Link>
           <div className="px-4 py-3 font-mono text-[10px] uppercase tracking-wider text-muted">
             {project?.name}

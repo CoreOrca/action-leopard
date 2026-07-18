@@ -23,6 +23,7 @@ export interface Project {
   reference_image_url: string | null;
   canvas_snapshot: unknown | null;
   current_prompt: string;
+  prompts: { image_a?: string; image_b?: string; video?: string };
   image_model: string;
   video_model: string;
   created_at: string;

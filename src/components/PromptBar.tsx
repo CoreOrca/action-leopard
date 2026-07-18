@@ -1,8 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useWorkspace } from "@/lib/store";
 import { getVideoModel } from "@/lib/models";
+
+type PromptTab = "image_a" | "image_b" | "video";
+
+const TAB_LABEL: Record<PromptTab, string> = {
+  image_a: "Frame A",
+  image_b: "Frame B",
+  video: "Video",
+};
+
+const TAB_MODE: Record<PromptTab, "image-a" | "image-b" | "video"> = {
+  image_a: "image-a",
+  image_b: "image-b",
+  video: "video",
+};
+
+interface InputChip {
+  key: string;
+  url: string;
+  role: string;
+}
 
 export default function PromptBar({
   projectId,
@@ -23,8 +43,8 @@ export default function PromptBar({
     setBusy,
   } = useWorkspace();
   const [seconds, setSeconds] = useState(5);
-
-  if (!project) return null;
+  const [tab, setTab] = useState<PromptTab>("image_a");
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
 
   const startFrame = assets.find((a) => a.id === startFrameId);
   const endFrame = assets.find((a) => a.id === endFrameId);
@@ -33,40 +53,69 @@ export default function PromptBar({
     .find((a) => a.type === "canvas-shot");
   const artDirectionImages = assets
     .filter((a) => a.type === "art-direction")
-    .slice(0, 2);
-  const videoModel = getVideoModel(project.video_model);
+    .slice(0, 3);
+  const videoModel = getVideoModel(project?.video_model ?? "");
 
-  function collectImageInputs(): { url: string; role: string }[] {
-    const inputs: { url: string; role: string }[] = [];
-    if (startFrame) inputs.push({ url: startFrame.url, role: "frame A (start)" });
-    else if (project?.reference_image_url)
-      inputs.push({ url: project.reference_image_url, role: "location reference" });
+  /** Candidate input images for the active tab; user can exclude any via chips. */
+  const candidates: InputChip[] = useMemo(() => {
+    const list: InputChip[] = [];
+    if (tab === "video") {
+      if (startFrame)
+        list.push({ key: "start", url: startFrame.url, role: "start frame (A)" });
+      if (endFrame)
+        list.push({ key: "end", url: endFrame.url, role: "end frame (B)" });
+      return list;
+    }
+    if (tab === "image_b") {
+      if (startFrame)
+        list.push({ key: "frame-a", url: startFrame.url, role: "frame A to edit" });
+    } else if (startFrame) {
+      list.push({ key: "frame-a", url: startFrame.url, role: "frame A (start)" });
+    }
+    if (project?.reference_image_url)
+      list.push({
+        key: "reference",
+        url: project.reference_image_url,
+        role: "location reference",
+      });
     if (latestCanvasShot)
-      inputs.push({ url: latestCanvasShot.url, role: "canvas blocking sketch" });
-    for (const a of artDirectionImages)
-      inputs.push({ url: a.url, role: "art direction" });
-    return inputs;
+      list.push({
+        key: "canvas",
+        url: latestCanvasShot.url,
+        role: "canvas blocking diagram (positions only)",
+      });
+    artDirectionImages.forEach((a, i) =>
+      list.push({
+        key: `ad-${a.id}`,
+        url: a.url,
+        role: `art direction reference ${i + 1} (style/grade only)`,
+      })
+    );
+    return list;
+  }, [tab, startFrame, endFrame, project?.reference_image_url, latestCanvasShot, artDirectionImages]);
+
+  const activeInputs = candidates.filter((c) => !excluded.has(c.key));
+
+  if (!project) return null;
+
+  const promptText = project.prompts?.[tab] ?? "";
+
+  function setPromptText(text: string) {
+    if (!project) return;
+    const prompts = { ...project.prompts, [tab]: text };
+    patchProject({ prompts });
+    onPatchProject({ prompts });
   }
 
-  async function writePrompt(mode: "image-a" | "image-b" | "video") {
+  async function writePrompt() {
     if (!project) return;
-    setBusy("Grok is writing the prompt…");
+    setBusy(`Grok is writing the ${TAB_LABEL[tab]} prompt…`);
     try {
-      const imageUrls =
-        mode === "video"
-          ? [
-              ...(startFrame
-                ? [{ url: startFrame.url, role: "start-frame" }]
-                : []),
-              ...(endFrame ? [{ url: endFrame.url, role: "end-frame" }] : []),
-            ]
-          : collectImageInputs();
-
       const res = await fetch("/api/prompt/write", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode,
+          mode: TAB_MODE[tab],
           intent: project.intent,
           artDirection: project.art_direction,
           elements: elements.map((e) => ({
@@ -74,16 +123,15 @@ export default function PromptBar({
             name: e.name,
             notes: e.notes,
           })),
-          imageUrls,
-          frameAPrompt: startFrame?.prompt ?? project.current_prompt,
+          imageUrls: activeInputs.map((i) => ({ url: i.url, role: i.role })),
+          frameAPrompt: project.prompts?.image_a ?? startFrame?.prompt ?? "",
           videoModel: project.video_model,
           seconds,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "prompt failed");
-      patchProject({ current_prompt: data.prompt });
-      onPatchProject({ current_prompt: data.prompt });
+      setPromptText(data.prompt);
     } catch (e) {
       alert((e as Error).message);
     } finally {
@@ -93,24 +141,27 @@ export default function PromptBar({
 
   async function generateImage() {
     if (!project) return;
-    if (!project.current_prompt.trim()) {
+    if (tab === "video") {
+      alert("Switch to the Frame A or Frame B tab to generate an image.");
+      return;
+    }
+    if (!promptText.trim()) {
       alert("Write or edit a prompt first.");
       return;
     }
-    const inputs = collectImageInputs();
-    if (!inputs.length) {
+    if (!activeInputs.length) {
       alert("Need at least one input image (reference, frame A, or canvas shot).");
       return;
     }
-    setBusy("Nano Banana Pro is rendering…");
+    setBusy("Rendering image…");
     try {
       const res = await fetch("/api/generate/image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId,
-          prompt: project.current_prompt,
-          imageUrls: inputs.map((i) => i.url),
+          prompt: promptText,
+          imageUrls: activeInputs.map((i) => i.url),
           modelId: project.image_model,
           aspectRatio: "16:9",
         }),
@@ -127,6 +178,11 @@ export default function PromptBar({
 
   async function generateVideo() {
     if (!project) return;
+    const videoPrompt = project.prompts?.video ?? "";
+    if (!videoPrompt.trim()) {
+      alert("Write the video prompt first (Video tab).");
+      return;
+    }
     const start =
       startFrame ??
       [...assets].reverse().find((a) => a.type === "image") ??
@@ -142,7 +198,7 @@ export default function PromptBar({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId,
-          prompt: project.current_prompt,
+          prompt: videoPrompt,
           modelId: project.video_model,
           startImageUrl: start.url,
           endImageUrl:
@@ -163,15 +219,31 @@ export default function PromptBar({
   return (
     <section className="border border-border-soft">
       <div className="flex items-center justify-between border-b border-border-soft px-2 py-1">
-        <span className="font-mono text-[10px] uppercase tracking-widest text-muted">
-          Prompt {busy ? `· ${busy}` : ""}
-        </span>
+        <div className="flex items-center gap-0">
+          {(Object.keys(TAB_LABEL) as PromptTab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`border px-3 py-1 font-mono text-[10px] uppercase tracking-wider ${
+                tab === t
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border-soft text-muted hover:border-border"
+              }`}
+            >
+              {TAB_LABEL[t]}
+              {project.prompts?.[t] ? " ●" : ""}
+            </button>
+          ))}
+          <span className="ml-3 font-mono text-[10px] text-muted">
+            {busy ?? ""}
+          </span>
+        </div>
         <div className="flex items-center gap-1">
           <label className="mr-2 font-mono text-[10px] text-muted">
             sec
             <input
               type="number"
-              min={1}
+              min={2}
               max={15}
               value={seconds}
               onChange={(e) => setSeconds(Number(e.target.value))}
@@ -179,31 +251,20 @@ export default function PromptBar({
             />
           </label>
           <button
-            onClick={() => writePrompt("image-a")}
-            disabled={!!busy}
+            onClick={writePrompt}
+            disabled={!!busy || (tab === "image_b" && !startFrame)}
             className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border disabled:opacity-40"
-            title="Write a staging (frame A) image prompt"
+            title={
+              tab === "image_b" && !startFrame
+                ? "Mark a start frame (A) first"
+                : `Have Grok write the ${TAB_LABEL[tab]} prompt`
+            }
           >
-            ✦ Frame A prompt
-          </button>
-          <button
-            onClick={() => writePrompt("image-b")}
-            disabled={!!busy || !startFrame}
-            className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border disabled:opacity-40"
-            title="Write a 'same scene, N seconds later' frame B prompt from the selected start frame"
-          >
-            ✦ Frame B prompt
-          </button>
-          <button
-            onClick={() => writePrompt("video")}
-            disabled={!!busy}
-            className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border disabled:opacity-40"
-          >
-            ✦ Video prompt
+            ✦ Write {TAB_LABEL[tab]} prompt
           </button>
           <button
             onClick={generateImage}
-            disabled={!!busy}
+            disabled={!!busy || tab === "video"}
             className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background disabled:opacity-40"
           >
             Generate image
@@ -217,23 +278,55 @@ export default function PromptBar({
           </button>
         </div>
       </div>
+
       <textarea
-        value={project.current_prompt}
-        onChange={(e) => {
-          patchProject({ current_prompt: e.target.value });
-          onPatchProject({ current_prompt: e.target.value });
-        }}
-        placeholder="The working prompt. Let Grok write it, then shape it by hand — it autosaves."
+        value={promptText}
+        onChange={(e) => setPromptText(e.target.value)}
+        placeholder={
+          tab === "video"
+            ? "The video prompt. ✦ Write it, then shape it by hand — autosaves."
+            : `The ${TAB_LABEL[tab]} image prompt. ✦ Write it, then shape it by hand — autosaves.`
+        }
         rows={4}
         className="w-full resize-y bg-transparent p-2 font-mono text-xs leading-relaxed outline-none"
       />
-      <div className="border-t border-border-soft px-2 py-1 font-mono text-[9px] text-muted">
-        image inputs:{" "}
-        {collectImageInputs()
-          .map((i) => i.role)
-          .join(" · ") || "none"}
-        {" — "}video: {startFrame ? "frame A set" : "auto (latest image)"}
-        {videoModel.supportsEndFrame && endFrame ? " + frame B" : ""}
+
+      <div className="flex flex-wrap items-center gap-1 border-t border-border-soft px-2 py-1">
+        <span className="font-mono text-[9px] uppercase text-muted">inputs:</span>
+        {candidates.length === 0 ? (
+          <span className="font-mono text-[9px] text-muted">none available</span>
+        ) : (
+          candidates.map((c) => {
+            const off = excluded.has(c.key);
+            return (
+              <button
+                key={c.key}
+                onClick={() =>
+                  setExcluded((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(c.key)) next.delete(c.key);
+                    else next.add(c.key);
+                    return next;
+                  })
+                }
+                className={`border px-1.5 py-0.5 font-mono text-[9px] ${
+                  off
+                    ? "border-border-soft text-muted line-through opacity-50"
+                    : "border-border"
+                }`}
+                title={off ? "Click to include" : "Click to exclude"}
+              >
+                {c.role} {off ? "" : "×"}
+              </button>
+            );
+          })
+        )}
+        {tab === "video" && (
+          <span className="ml-auto font-mono text-[9px] text-muted">
+            {startFrame ? "frame A set" : "auto start: latest image"}
+            {videoModel.supportsEndFrame && endFrame ? " + frame B" : ""}
+          </span>
+        )}
       </div>
     </section>
   );

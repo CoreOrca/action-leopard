@@ -120,6 +120,17 @@ export async function generateVideo(opts: {
       keep_original_sound: false,
       ...(opts.prompt ? { prompt: opts.prompt.slice(0, 2500) } : {}),
     };
+  } else if (model.falId.includes("seedance")) {
+    input = {
+      prompt: opts.prompt,
+      image_url: opts.startImageUrl,
+      resolution: model.resolution ?? "1080p",
+      duration: String(Math.min(Math.max(opts.duration ?? 5, 2), 12)),
+      camera_fixed: false,
+      ...(model.supportsEndFrame && opts.endImageUrl
+        ? { end_image_url: opts.endImageUrl }
+        : {}),
+    };
   } else {
     // Kling 3 Pro image-to-video
     input = {

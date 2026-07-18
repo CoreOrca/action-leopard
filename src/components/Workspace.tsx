@@ -105,7 +105,7 @@ export default function Workspace({ projectId }: { projectId: string }) {
               onEditorReady={setEditor}
               onSnapshotChange={onSnapshotChange}
             />
-            <PreviewPanel onAnnotate={onAnnotate} />
+            <PreviewPanel projectId={projectId} onAnnotate={onAnnotate} />
           </div>
           <PromptBar projectId={projectId} onPatchProject={patchProject} />
           <VideoStrip />

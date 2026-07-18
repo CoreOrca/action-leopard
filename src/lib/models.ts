@@ -24,6 +24,12 @@ export const IMAGE_MODELS: ImageModelDef[] = [
     falId: "fal-ai/gemini-3-pro-image-preview/edit",
     maxImages: 6,
   },
+  {
+    id: "nano-banana-2",
+    label: "Nano Banana 2",
+    falId: "fal-ai/nano-banana-2/edit",
+    maxImages: 6,
+  },
 ];
 
 export const VIDEO_MODELS: VideoModelDef[] = [
@@ -57,6 +63,22 @@ export const VIDEO_MODELS: VideoModelDef[] = [
     falId: "fal-ai/kling-video/v3/pro/image-to-video",
     supportsEndFrame: true,
     supportsVideoInput: true,
+  },
+  {
+    id: "seedance-1-pro",
+    label: "Seedance 1.0 Pro · start/end frame",
+    falId: "fal-ai/bytedance/seedance/v1/pro/image-to-video",
+    supportsEndFrame: true,
+    supportsVideoInput: false,
+    resolution: "1080p",
+  },
+  {
+    id: "seedance-1-pro-fast",
+    label: "Seedance 1.0 Pro Fast · budget",
+    falId: "fal-ai/bytedance/seedance/v1/pro/fast/image-to-video",
+    supportsEndFrame: false,
+    supportsVideoInput: false,
+    resolution: "720p",
   },
   {
     id: "kling-3-pro-motion",

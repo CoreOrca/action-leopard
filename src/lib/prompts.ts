@@ -30,7 +30,13 @@ export const FRAME_DELTA_RULES = `START/END FRAME STRATEGY (Nano Banana Pro + Kl
 - Frame B prompt: an EDIT of frame A, phrased as "same camera position, same scene, N seconds later:" followed by per-object deltas — "the silver truck now 80 meters further along the road, noticeably smaller; the black sedan now one car-length behind the coupe." Describe the delta between two stills, not motion in words.
 - Frame B must be geometrically plausible from frame A, or interpolation morphs. Keep deltas conservative: one beat of action per 5-second segment.
 - Chain beats for long action: A→B, B→C, each segment one beat. This is storyboarding.
-- The in-between path is still the video model's choice; when the path matters (no swerve, stay in lane), state it as an invariant in the video prompt too.`;
+- The in-between path is still the video model's choice; when the path matters (no swerve, stay in lane), state it as an invariant in the video prompt too.
+
+PROPORTION DISCIPLINE (critical for frame B edits): Image models over-obey size language. Never write unqualified phrases like "larger in frame" or "noticeably closer to camera" — models respond by inflating the subject to an unnatural scale. Instead:
+- Anchor subject scale to the ENVIRONMENT, with real-world dimensions when inferable: "the walkway is about 10 feet wide; the two figures remain in true proportion to it — a running adult occupies roughly a third of the walkway's width."
+- Describe advancement as POSITION along a named environmental anchor ("they have advanced to the section of walkway near the third railing joint, closer to the foreground edge"), not as a size change.
+- If you must mention perspective growth, bound it: "only slightly larger, exactly as much as the camera geometry implies for that distance — the environment's scale is the reference and does not change."
+- Always state: "all architecture and environment remain at exactly the same scale and position as the previous frame."`;
 
 export const SCENE_TRANSLATE_SYSTEM = `${DIRECTOR_VOICE}
 
@@ -60,7 +66,9 @@ ${FRAME_DELTA_RULES}
 
 TASK: Write prompts for Nano Banana Pro (an image editing model that takes one or more input images plus a text instruction). You will be given: the user's intent, art direction text, descriptions of attached reference/element images, optionally a canvas blocking sketch, and which frame you are producing (a staging frame A, or a "same scene, N seconds later" frame B edit).
 
-- When a canvas sketch is among the inputs, treat it as a BLOCKING DIAGRAM: the positions, relative scales, and annotated arrows describe where things belong in the new image. Say so explicitly in the prompt ("place the vehicles and figures following the positions in the diagram image; render them photorealistically in the style and setting of the location photo").
+- When a canvas sketch is among the inputs, treat it as a BLOCKING DIAGRAM: it communicates POSITIONS and LAYOUT only — never sizes. Diagram shapes are crude boxes; their pixel dimensions must not influence subject scale. Say so explicitly in the prompt ("place the vehicles and figures at the positions indicated in the diagram image, rendered photorealistically at true proportion to the location — the diagram indicates placement only, not size").
+- ART DIRECTION IMAGES are style references ONLY. For every attached art direction image, the prompt you write MUST include an explicit sentence identifying it and constraining its role, e.g.: "The image of [short description] is an art direction reference: apply only its color grading, palette, contrast, texture and overall aesthetic sensibility — do not copy any subject, person, object, composition or content from it." Never let art direction imagery introduce content into the scene.
+- Enumerate every attached image's role in the prompt (location photo, frame A to edit, blocking diagram, element reference, art direction reference) so the image model cannot confuse them.
 - When drawings/annotations are overlaid on a photo (arrows, paths, circles), interpret them as motion paths, destinations, or emphasis — translate their meaning into the prompt, and instruct the model to NOT render the markings themselves.
 - Be complete: staging, orientation of every subject, camera position and lens feel, light matching the reference image, textures and materials. Use the full character budget when the scene demands it.
 - Respond with ONLY the prompt text, no commentary.`;

@@ -1,10 +1,14 @@
 "use client";
 
+import { useRef } from "react";
 import { useWorkspace } from "@/lib/store";
+import { saveBlobAsAsset } from "@/lib/canvas";
 
 export default function PreviewPanel({
+  projectId,
   onAnnotate,
 }: {
+  projectId: string;
   onAnnotate: (url: string) => void;
 }) {
   const {
@@ -15,7 +19,38 @@ export default function PreviewPanel({
     endFrameId,
     setStartFrame,
     setEndFrame,
+    addAssets,
+    removeAsset,
+    setBusy,
   } = useWorkspace();
+  const uploadInput = useRef<HTMLInputElement>(null);
+
+  async function uploadImage(file: File) {
+    setBusy("Uploading image…");
+    try {
+      const asset = await saveBlobAsAsset(file, {
+        projectId,
+        type: "image",
+        pathname: `projects/${projectId}/uploads/${file.name}`,
+        metadata: { source: "user-upload" },
+      });
+      addAssets([asset]);
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deleteAsset(id: string) {
+    if (!confirm("Delete this asset?")) return;
+    removeAsset(id);
+    await fetch("/api/assets/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+  }
 
   const selected =
     assets.find((a) => a.id === selectedAssetId) ??
@@ -111,16 +146,32 @@ export default function PreviewPanel({
       </div>
 
       <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-border-soft px-1">
+        <button
+          onClick={() => uploadInput.current?.click()}
+          className="flex h-12 w-10 shrink-0 items-center justify-center border border-dashed border-border-soft font-mono text-sm text-muted hover:border-border hover:text-foreground"
+          title="Upload an outside image (usable as start/end frame)"
+        >
+          +
+        </button>
+        <input
+          ref={uploadInput}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.[0]) uploadImage(e.target.files[0]);
+            e.target.value = "";
+          }}
+        />
         {images.length === 0 ? (
           <span className="px-2 font-mono text-[10px] text-muted">
             image palette — empty
           </span>
         ) : (
           images.map((a) => (
-            <button
+            <div
               key={a.id}
-              onClick={() => select(a.id)}
-              className={`relative h-12 w-16 shrink-0 border ${
+              className={`group relative h-12 w-16 shrink-0 border ${
                 selected?.id === a.id
                   ? "border-foreground"
                   : "border-border-soft hover:border-border"
@@ -131,8 +182,9 @@ export default function PreviewPanel({
               <img
                 src={a.url}
                 alt=""
-                className="h-full w-full object-cover"
+                className="h-full w-full cursor-pointer object-cover"
                 loading="lazy"
+                onClick={() => select(a.id)}
               />
               {startFrameId === a.id && (
                 <span className="absolute left-0 top-0 bg-foreground px-1 font-mono text-[8px] text-background">
@@ -140,11 +192,21 @@ export default function PreviewPanel({
                 </span>
               )}
               {endFrameId === a.id && (
-                <span className="absolute right-0 top-0 bg-foreground px-1 font-mono text-[8px] text-background">
+                <span className="absolute bottom-0 right-0 bg-foreground px-1 font-mono text-[8px] text-background">
                   B
                 </span>
               )}
-            </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteAsset(a.id);
+                }}
+                className="absolute right-0 top-0 hidden bg-background/90 px-1 font-mono text-[10px] text-danger group-hover:block"
+                title="Delete asset"
+              >
+                ×
+              </button>
+            </div>
           ))
         )}
       </div>

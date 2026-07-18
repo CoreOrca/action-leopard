@@ -27,8 +27,12 @@ export default function SidePanel({
     patchProject,
     elements,
     setElements,
+    assets,
     addAssets,
+    removeAsset,
     setBusy,
+    setAgentOpen,
+    agentOpen,
   } = useWorkspace();
   const refInput = useRef<HTMLInputElement>(null);
   const adInput = useRef<HTMLInputElement>(null);
@@ -139,6 +143,12 @@ export default function SidePanel({
           rows={4}
           className="w-full border border-border-soft bg-transparent p-2 text-xs outline-none focus:border-border"
         />
+        <button
+          onClick={() => setAgentOpen(!agentOpen)}
+          className="mt-1 w-full border border-foreground px-2 py-2 font-mono text-[10px] uppercase tracking-widest hover:bg-foreground hover:text-background"
+        >
+          ⟡ {agentOpen ? "Close agent" : "Agent"}
+        </button>
       </div>
 
       {/* Reference image */}
@@ -186,6 +196,38 @@ export default function SidePanel({
           rows={4}
           className="w-full border border-border-soft bg-transparent p-2 text-xs outline-none focus:border-border"
         />
+        <div className="mt-1 flex flex-wrap gap-1">
+          {assets
+            .filter((a) => a.type === "art-direction")
+            .map((a) => (
+              <div
+                key={a.id}
+                className="group relative h-12 w-12 border border-border-soft"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={a.url}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+                <button
+                  onClick={async () => {
+                    removeAsset(a.id);
+                    await fetch("/api/assets/delete", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ id: a.id }),
+                    });
+                  }}
+                  className="absolute right-0 top-0 hidden bg-background/90 px-1 font-mono text-[10px] text-danger group-hover:block"
+                  title="Delete"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+        </div>
         <button
           onClick={() => adInput.current?.click()}
           className="mt-1 w-full border border-border-soft px-2 py-1.5 font-mono text-[10px] uppercase tracking-wider hover:border-border"

@@ -167,16 +167,7 @@ export default function AgentModal({
     }
   }
 
-  if (!agentOpen) {
-    return (
-      <button
-        onClick={() => setAgentOpen(true)}
-        className="fixed bottom-4 right-4 z-40 border border-foreground bg-background px-4 py-2 font-mono text-xs uppercase tracking-widest hover:bg-foreground hover:text-background"
-      >
-        ⟡ Agent
-      </button>
-    );
-  }
+  if (!agentOpen) return null;
 
   return (
     <div className="fixed bottom-4 right-4 z-40 flex h-[70vh] w-[26rem] flex-col border border-border bg-background shadow-xl">

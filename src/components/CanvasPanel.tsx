@@ -35,10 +35,18 @@ export default function CanvasPanel({
       editorRef.current = editor;
       onEditorReady(editor);
 
-      editor.user.updateUserPreferences({
-        colorScheme: document.documentElement.classList.contains("dark")
-          ? "dark"
-          : "light",
+      const syncTheme = () =>
+        editor.user.updateUserPreferences({
+          colorScheme: document.documentElement.classList.contains("dark")
+            ? "dark"
+            : "light",
+        });
+      syncTheme();
+      // Follow the app's theme toggle live.
+      const observer = new MutationObserver(syncTheme);
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class"],
       });
 
       const snap = useWorkspace.getState().project?.canvas_snapshot;
