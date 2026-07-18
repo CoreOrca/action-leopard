@@ -78,7 +78,7 @@ export default function SceneAgentPanel({
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border-soft px-3 py-2">
         <span className="font-mono text-[11px] uppercase tracking-widest">
-          ⟡ Scene agent
+          ⟡ Action scene maker
           <span className="ml-3 normal-case tracking-normal text-muted">
             {PHASE_LABEL[phase]}
           </span>

@@ -198,7 +198,7 @@ export default function ShotsCanvas({
           className="whitespace-nowrap border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background disabled:opacity-40"
           title="Generate video clips for finished shots"
         >
-          Make me a video
+          Action scene maker
         </button>
         <button
           onClick={() => uploadInput.current?.click()}
