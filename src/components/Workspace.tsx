@@ -166,6 +166,7 @@ export default function Workspace({ projectId }: { projectId: string }) {
           onCancel={() => cancelRun()}
           onReplan={() => replanScene()}
           onMakeEndFrames={() => makeEndFrames()}
+          onMakeVideos={() => makeVideos()}
           onRetryShot={(id) => retryShot(id)}
           onAcceptShot={(id) => acceptShot(id)}
           onApproveVersion={(id, assetId) => approveShotFrame(id, assetId)}

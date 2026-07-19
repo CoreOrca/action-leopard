@@ -69,6 +69,7 @@ export default function SceneAgentPanel({
   onCancel,
   onReplan,
   onMakeEndFrames,
+  onMakeVideos,
   onRetryShot,
   onAcceptShot,
   onApproveVersion,
@@ -81,6 +82,7 @@ export default function SceneAgentPanel({
   onCancel?: () => void;
   onReplan?: () => void;
   onMakeEndFrames?: () => void;
+  onMakeVideos?: () => void;
   onRetryShot?: (shotId: string) => void;
   onAcceptShot?: (shotId: string) => void;
   onApproveVersion?: (shotId: string, assetId: string) => void;
@@ -182,6 +184,12 @@ export default function SceneAgentPanel({
       !s.end_asset_id &&
       ["passed", "accepted"].includes(s.status)
   );
+  const videoReady = shots.filter(
+    (s) =>
+      s.start_asset_id &&
+      !s.video_asset_id &&
+      (["passed", "accepted"].includes(s.status) || s.kind === "transition")
+  );
   const resumable =
     phase === "paused" &&
     shots.some((s) =>
@@ -200,6 +208,8 @@ export default function SceneAgentPanel({
       ?.url ?? null;
 
   function openInFixit(shotId: string) {
+    // Land on this shot's own frame, not a stale/other-shot selection.
+    useWorkspace.getState().select(null);
     setActiveShot(shotId);
     setView("fixit");
     setPanelOpen(false);
@@ -655,15 +665,26 @@ export default function SceneAgentPanel({
             Resume run
           </button>
         )}
+        {!busy && videoReady.length > 0 && (
+          <button
+            onClick={onMakeVideos}
+            disabled={!onMakeVideos}
+            className="mt-1 w-full border border-border px-3 py-2 font-mono text-[11px] uppercase tracking-widest hover:bg-foreground hover:text-background disabled:opacity-40"
+            title="Render a clip for every finished shot with your selected video model — or use ▶ on a shot card for just one"
+          >
+            ▶ Generate {videoReady.length} video
+            {videoReady.length > 1 ? "s" : ""}
+          </button>
+        )}
         {!busy && endFrameReady.length > 0 && (
           <button
             onClick={onMakeEndFrames}
             disabled={!onMakeEndFrames}
-            className="mt-1 w-full border border-border px-3 py-2 font-mono text-[11px] uppercase tracking-widest hover:bg-foreground hover:text-background disabled:opacity-40"
-            title="Frame B for each finished shot — for end-frame video models like Kling and Seedance"
+            className="mt-1 w-full border border-border-soft px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-muted hover:border-border hover:text-foreground disabled:opacity-40"
+            title="Optional — frame B is only used by start+end-frame video models (Kling, Seedance). Skip it for single-frame models like Grok Imagine."
           >
             Generate {endFrameReady.length} end frame
-            {endFrameReady.length > 1 ? "s" : ""}
+            {endFrameReady.length > 1 ? "s" : ""} (optional)
           </button>
         )}
         {!busy && shots.length > 0 && (

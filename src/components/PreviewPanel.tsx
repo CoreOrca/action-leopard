@@ -64,13 +64,23 @@ export default function PreviewPanel({
 
   const images = filterAssets(assets);
 
-  const selected =
-    assets.find((a) => a.id === selectedAssetId) ??
-    (scoped
-      ? [...images].reverse().find((a) => a.type === "image") ??
-        images[images.length - 1]
-      : [...assets].reverse().find((a) => a.type === "image") ??
-        assets[assets.length - 1]);
+  // Scoped: only honor a selection that belongs to this shot's own set —
+  // agent generations for OTHER shots must never replace what the user is
+  // looking at. Default: the marked start frame, else the shot's latest frame.
+  const selectedRaw = assets.find((a) => a.id === selectedAssetId);
+  const selected = scoped
+    ? (selectedRaw && images.some((i) => i.id === selectedRaw.id)
+        ? selectedRaw
+        : undefined) ??
+      images.find((a) => a.id === startFrameId) ??
+      [...images]
+        .reverse()
+        .find((a) => a.metadata?.shot_id === shot?.id && a.type === "image") ??
+      [...images].reverse().find((a) => a.type === "image") ??
+      images[images.length - 1]
+    : selectedRaw ??
+      [...assets].reverse().find((a) => a.type === "image") ??
+      assets[assets.length - 1];
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col border border-border-soft">

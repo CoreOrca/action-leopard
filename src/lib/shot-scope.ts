@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef } from "react";
 import { useWorkspace } from "@/lib/store";
 import { useSceneAgent } from "@/lib/scene-store";
 import { patchShot } from "@/lib/shots";
+import { computeResume } from "@/lib/scene-agent";
 import type { Asset, Shot, ShotSpec } from "@/lib/types";
 
 type Prompts = { image_a?: string; image_b?: string; video?: string };
@@ -103,8 +104,17 @@ export function useShotScope(
   const setStart = useCallback(
     (id: string | null) => {
       if (shot) {
-        patchShotLocal(shot.id, { start_asset_id: id });
-        patchShot(shot.id, { start_asset_id: id }).catch(() => {});
+        // Marking a start frame IS approval: an escalated ("needs you") or
+        // still-planned shot the user just chose a frame for is accepted.
+        const patch: Partial<Shot> = { start_asset_id: id };
+        if (id && ["escalated", "planned"].includes(shot.status))
+          patch.status = "accepted";
+        patchShotLocal(shot.id, patch);
+        patchShot(shot.id, patch).catch(() => {});
+        if (patch.status) {
+          const scene = useSceneAgent.getState();
+          scene.setPhase(computeResume(scene.shots).phase);
+        }
       } else setStartFrame(id);
     },
     [shot, patchShotLocal, setStartFrame]

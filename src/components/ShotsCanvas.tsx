@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { useWorkspace } from "@/lib/store";
 import { useSceneAgent } from "@/lib/scene-store";
 import { insertShot, deleteShot, reorderShots } from "@/lib/shots";
-import { uploadShotStartFrame } from "@/lib/scene-agent";
+import { uploadShotStartFrame, acceptShot, makeVideos } from "@/lib/scene-agent";
 import { desktopDragProps, downloadAsset } from "@/lib/download";
 import type { Shot } from "@/lib/types";
 
@@ -173,6 +173,9 @@ export default function ShotsCanvas({
   }
 
   function openShot(id: string) {
+    // Clear any stale preview selection so shot detail opens on THIS shot's
+    // frame, not whatever was last selected or generated elsewhere.
+    useWorkspace.getState().select(null);
     setActiveShot(id);
     setView("fixit");
   }
@@ -183,12 +186,20 @@ export default function ShotsCanvas({
   const toolbar = (
     <div className="flex items-center gap-1">
         <button
-          onClick={onMakeVideo}
-          disabled={!onMakeVideo || !!busy}
+          onClick={() => useSceneAgent.getState().setPanelOpen(true)}
+          disabled={!!busy}
           className="whitespace-nowrap border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background disabled:opacity-40"
-          title="Generate video clips for finished shots"
+          title="Open the Action scene maker window"
         >
           Action scene maker
+        </button>
+        <button
+          onClick={onMakeVideo}
+          disabled={!onMakeVideo || !!busy}
+          className="whitespace-nowrap border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border disabled:opacity-40"
+          title="Generate video clips for every finished shot (or use ▶ on a card for just one)"
+        >
+          ▶ Make videos
         </button>
         <button
           onClick={() => uploadInput.current?.click()}
@@ -328,6 +339,35 @@ export default function ShotsCanvas({
                   </span>
                 )}
                 <div className="absolute right-1.5 top-1.5 hidden gap-1 group-hover:flex">
+                  {shot.status === "escalated" && url && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        acceptShot(shot.id);
+                      }}
+                      disabled={!!busy}
+                      className="border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] hover:bg-foreground hover:text-background disabled:opacity-40"
+                      title="Approve this frame — clears needs-you"
+                    >
+                      ✓
+                    </button>
+                  )}
+                  {!!shot.start_asset_id &&
+                    !shot.video_asset_id &&
+                    (["passed", "accepted"].includes(shot.status) ||
+                      shot.kind === "transition") && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          makeVideos({ shotIds: [shot.id] });
+                        }}
+                        disabled={!!busy}
+                        className="border border-border-soft bg-background px-1.5 py-0.5 font-mono text-[10px] hover:border-border disabled:opacity-40"
+                        title="Generate this shot's video clip"
+                      >
+                        ▶
+                      </button>
+                    )}
                   {url && (
                     <button
                       onClick={(e) => {

@@ -359,7 +359,7 @@ async function generateFrame(
     if (!res.ok) throw new Error(data.error ?? "generation failed");
     asset = data.assets[0];
   }
-  useWorkspace.getState().addAssets([asset]);
+  useWorkspace.getState().addAssets([asset], { select: false });
   scene.pushEvent({
     kind: "gen",
     shotId,
@@ -759,7 +759,7 @@ export async function makeEndFrames(): Promise<void> {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "end-frame generation failed");
       const asset = data.assets[0] as Asset;
-      useWorkspace.getState().addAssets([asset]);
+      useWorkspace.getState().addAssets([asset], { select: false });
       await persistShot(shot.id, { end_asset_id: asset.id });
       scene.pushEvent({
         kind: "gen",
@@ -786,7 +786,9 @@ export async function makeEndFrames(): Promise<void> {
  * order. Writes the video prompt first (via /api/prompt/write) when a shot
  * doesn't have one. Confirms the credit spend before starting.
  */
-export async function makeVideos(): Promise<void> {
+export async function makeVideos(
+  opts: { shotIds?: string[] } = {}
+): Promise<void> {
   const { project } = useWorkspace.getState();
   const scene = useSceneAgent.getState();
   if (!project) return;
@@ -796,6 +798,7 @@ export async function makeVideos(): Promise<void> {
     .getState()
     .shots.filter(
       (s) =>
+        (!opts.shotIds || opts.shotIds.includes(s.id)) &&
         !s.video_asset_id &&
         s.start_asset_id &&
         (["passed", "accepted"].includes(s.status) || s.kind === "transition")
@@ -891,7 +894,7 @@ export async function makeVideos(): Promise<void> {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "video generation failed");
-      useWorkspace.getState().addAssets([data.asset]);
+      useWorkspace.getState().addAssets([data.asset], { select: false });
       await persistShot(shot.id, { video_asset_id: data.asset.id });
       scene.pushEvent({
         kind: "gen",
@@ -972,7 +975,7 @@ export async function uploadShotStartFrame(
     pathname: `projects/${projectId}/shots/${shotId}/${file.name}`,
     metadata: { shot_id: shotId, shot_role: "start", version, manual: true },
   });
-  useWorkspace.getState().addAssets([asset]);
+  useWorkspace.getState().addAssets([asset], { select: false });
   await persistShot(shotId, { start_asset_id: asset.id, status: "accepted" });
   const scene = useSceneAgent.getState();
   scene.pushEvent({

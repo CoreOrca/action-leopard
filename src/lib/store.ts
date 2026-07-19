@@ -17,7 +17,9 @@ interface WorkspaceState {
   patchProject: (patch: Partial<Project>) => void;
   setElements: (e: Element[]) => void;
   setAssets: (a: Asset[]) => void;
-  addAssets: (a: Asset[]) => void;
+  /** opts.select=false leaves the preview selection alone (agent-loop
+   *  generations must never hijack what the user is looking at). */
+  addAssets: (a: Asset[], opts?: { select?: boolean }) => void;
   removeAsset: (id: string) => void;
   select: (id: string | null) => void;
   setStartFrame: (id: string | null) => void;
@@ -41,10 +43,13 @@ export const useWorkspace = create<WorkspaceState>((set) => ({
     set((s) => ({ project: s.project ? { ...s.project, ...patch } : null })),
   setElements: (elements) => set({ elements }),
   setAssets: (assets) => set({ assets }),
-  addAssets: (newAssets) =>
+  addAssets: (newAssets, opts) =>
     set((s) => ({
       assets: [...s.assets, ...newAssets],
-      selectedAssetId: newAssets[newAssets.length - 1]?.id ?? s.selectedAssetId,
+      selectedAssetId:
+        opts?.select === false
+          ? s.selectedAssetId
+          : newAssets[newAssets.length - 1]?.id ?? s.selectedAssetId,
     })),
   removeAsset: (id) =>
     set((s) => ({ assets: s.assets.filter((a) => a.id !== id) })),
