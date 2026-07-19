@@ -10,6 +10,8 @@ Video models revert objects, vehicles, people, and architecture to "most likely"
 2. **Canvas → control frames**: canvas screenshots + art direction images go to an image edit model to stage **frame A**, then a "same camera, N seconds later" edit produces **frame B** — the end frame implicitly encodes a displacement vector for every object.
 3. **Frames → video**: start+end-frame models interpolate A→B; single-frame models animate frame A with a screen-space-directed motion prompt. Chain 5-second beats for long sequences — storyboarding, mechanized.
 
+All image, video, and segmentation generation runs on **[fal.ai](https://fal.ai)** — one queue API in front of every model in the registry (Nano Banana, Kling, Seedance, Grok Imagine, SAM), so models are swappable per generation and new ones are a registry entry away.
+
 The prompt writer is trained by system prompt to describe **the delta between two stills** and to direct in **screen space** ("enters frame bottom-right", "the ocean stays on the right edge for the entire shot") — language video models actually obey. Location photos are treated as **the set**, not a mood board: geometry, landmarks, and proportions are law. Art direction images are **style only** — they may never smuggle content into the frame. Element references (characters, vehicles, props) inform *appearance*, never force *presence*.
 
 ## Two ways to work
@@ -60,10 +62,11 @@ The system prompts encode a **camera geometry contract**: every image prompt mus
 ## Stack
 
 - Next.js (App Router) on Vercel · Supabase (Postgres + Auth) · Vercel Blob (all media, app-owned URLs) · tldraw SDK (canvas) · zustand (state)
+- **Generation: [fal.ai](https://fal.ai)** — every image, video, and segmentation model runs through fal's queue API:
+  - Image: **Nano Banana Pro** (`fal-ai/gemini-3-pro-image-preview/edit`), **Nano Banana 2** (`fal-ai/nano-banana-2/edit`)
+  - Video: **Grok Imagine 1.5** i2v 480/720/1080p, **Kling 3 Pro** start+end frames, Kling 3 Pro motion control (guide video), **Seedance 2.0** start+end frames, **Seedance 2.0 Fast** multi-reference + video input
+  - Segmentation: **SAM 3.1** (`fal-ai/sam-3-1/image` — text, point, and box prompts; per-instance masks)
 - LLMs: **grok-4.5** via the xAI API (planner, prompt writer, scene translation, production agent) · **Claude Sonnet** via the Anthropic API (scene judge + fix rewriter — an independent model from the builder; falls back to grok if unset)
-- Image: **Nano Banana Pro** (`fal-ai/gemini-3-pro-image-preview/edit`), **Nano Banana 2** (`fal-ai/nano-banana-2/edit`)
-- Video: **Grok Imagine 1.5** i2v 480/720/1080p, **Kling 3 Pro** start+end frames, Kling 3 Pro motion control (guide video), **Seedance 2.0** start+end frames, **Seedance 2.0 Fast** multi-reference + video input
-- Segmentation: **SAM 3.1** (`fal-ai/sam-3-1/image` — text, point, and box prompts; per-instance masks)
 
 ## Setup
 
