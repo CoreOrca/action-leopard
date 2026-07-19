@@ -233,8 +233,19 @@ function buildInputs(
       role: "previous shot's approved frame — world-state continuity reference only, not composition",
     });
 
+  // Only elements the planner staged as VISIBLE in this shot ride along —
+  // an attached character reference tends to force the character into the
+  // frame. Specs without the field (legacy / manual shots) attach all.
+  const staged = (shot.spec as Partial<ShotSpec>)?.elements?.map((n) =>
+    n.trim().toLowerCase()
+  );
+  const isStaged = (name: string) => {
+    if (!staged) return true;
+    const n = name.trim().toLowerCase();
+    return staged.some((s) => s === n || s.includes(n) || n.includes(s));
+  };
   for (const el of elements) {
-    if (el.image_url)
+    if (el.image_url && isStaged(el.name))
       list.push({
         key: `element:${el.name}`,
         url: el.image_url,

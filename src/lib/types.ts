@@ -168,6 +168,10 @@ export interface ShotSpec {
   directive?: ActionDirectiveKey;
   /** Real-world dimension estimates for this shot's location segment. */
   scale_anchors?: string[];
+  /** Names of project elements LITERALLY VISIBLE in this frame — only their
+   *  reference images are attached to the generator. Absent = attach all
+   *  (legacy shots keep their old behavior). */
+  elements?: string[];
 }
 
 export type JudgeCheckId =
