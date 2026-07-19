@@ -25,6 +25,29 @@ export function desktopDragProps(url: string, filename?: string) {
   };
 }
 
+/** In-app asset drag payload MIME (drop targets: the prompt bar's INPUTS rail). */
+export const ASSET_DRAG_MIME = "application/x-al-asset";
+
+/**
+ * Drag props for an asset thumbnail: desktop/Finder download PLUS an in-app
+ * payload so the asset can be dropped onto the prompt bar's INPUTS rail as an
+ * extra generation input.
+ */
+export function assetDragProps(asset: { id: string; url: string; type: string }) {
+  const base = desktopDragProps(asset.url);
+  return {
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      base.onDragStart(e);
+      e.dataTransfer.setData(
+        ASSET_DRAG_MIME,
+        JSON.stringify({ id: asset.id, url: asset.url, type: asset.type })
+      );
+      e.dataTransfer.effectAllowed = "copyMove";
+    },
+  };
+}
+
 /** Force a real download (cross-origin `download` attributes are ignored). */
 export async function downloadAsset(
   url: string,

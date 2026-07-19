@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useWorkspace } from "@/lib/store";
 import { useShotScope } from "@/lib/shot-scope";
 import { shotGenerationInputs } from "@/lib/scene-agent";
 import { getImageModel, getVideoModel } from "@/lib/models";
+import { ASSET_DRAG_MIME } from "@/lib/download";
 
 type PromptTab = "image_a" | "image_b" | "video";
 
@@ -45,6 +46,13 @@ export default function PromptBar({
   const [seconds, setSeconds] = useState(5);
   const [tab, setTab] = useState<PromptTab>("image_a");
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  /** Images dragged in from the preview rail — extra generation inputs. */
+  const [extras, setExtras] = useState<InputChip[]>([]);
+  const [dropActive, setDropActive] = useState(false);
+
+  // Dragged-in inputs are per-shot working aids — clear them on scope change.
+  const scopedShotId = scope.shot?.id ?? null;
+  useEffect(() => setExtras([]), [scopedShotId]);
 
   const startFrame = assets.find((a) => a.id === scope.startFrameId);
   const endFrame = assets.find((a) => a.id === scope.endFrameId);
@@ -169,7 +177,37 @@ export default function PromptBar({
     return list;
   }, [tab, startFrame, endFrame, scope.shot, project, elements, scope.referenceUrl, latestCanvasShot, artDirectionImages]);
 
-  const activeInputs = candidates.filter((c) => !excluded.has(c.key));
+  // Video generation takes only start/end frames — dragged-in images apply to
+  // the image tabs.
+  const allChips = tab === "video" ? candidates : [...candidates, ...extras];
+  const activeInputs = allChips.filter((c) => !excluded.has(c.key));
+
+  function handleAssetDrop(e: React.DragEvent) {
+    const raw = e.dataTransfer.getData(ASSET_DRAG_MIME);
+    if (!raw || tab === "video") return;
+    e.preventDefault();
+    setDropActive(false);
+    try {
+      const a = JSON.parse(raw) as { id: string; url: string; type: string };
+      if (a.type === "video") return;
+      setExtras((prev) => {
+        if (
+          prev.some((c) => c.url === a.url) ||
+          candidates.some((c) => c.url === a.url)
+        )
+          return prev;
+        const role =
+          a.type === "canvas-shot"
+            ? "canvas shot (added)"
+            : a.type === "drawing"
+              ? "annotated image (added)"
+              : "added reference";
+        return [...prev, { key: `extra-${a.id}`, url: a.url, role }];
+      });
+    } catch {
+      // not our payload — ignore
+    }
+  }
 
   if (!project) return null;
 
@@ -368,11 +406,28 @@ export default function PromptBar({
         className="w-full resize-y bg-transparent p-2 font-mono text-xs leading-relaxed outline-none"
       />
 
-      {/* One row, horizontal scroll — adding inputs never wraps or resizes. */}
-      <div className="flex items-center gap-1 overflow-x-auto border-t border-border-soft px-2 py-1">
+      {/* One row, horizontal scroll — adding inputs never wraps or resizes.
+          Also a drop target: drag any image thumbnail from the preview rail
+          here to add it as a generation input. */}
+      <div
+        className={`flex items-center gap-1 overflow-x-auto border-t px-2 py-1 ${
+          dropActive ? "border-foreground bg-panel" : "border-border-soft"
+        }`}
+        onDragOver={(e) => {
+          if (tab !== "video" && e.dataTransfer.types.includes(ASSET_DRAG_MIME)) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            setDropActive(true);
+          }
+        }}
+        onDragLeave={() => setDropActive(false)}
+        onDrop={handleAssetDrop}
+      >
         <span className="shrink-0 font-mono text-[9px] uppercase text-muted">inputs:</span>
-        {candidates.length === 0 ? (
-          <span className="shrink-0 font-mono text-[9px] text-muted">none available</span>
+        {candidates.length === 0 && extras.length === 0 ? (
+          <span className="shrink-0 font-mono text-[9px] text-muted">
+            none — drag a thumbnail here
+          </span>
         ) : (
           candidates.map((c) => {
             const off = excluded.has(c.key);
@@ -406,6 +461,26 @@ export default function PromptBar({
             );
           })
         )}
+        {tab !== "video" &&
+          extras.map((c) => (
+            <button
+              key={c.key}
+              onClick={() =>
+                setExtras((prev) => prev.filter((x) => x.key !== c.key))
+              }
+              className="flex shrink-0 items-center gap-1 whitespace-nowrap border border-foreground py-0.5 pl-0.5 pr-1.5 font-mono text-[9px]"
+              title="Dragged-in input — click to remove"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={c.url}
+                alt=""
+                className="h-5 w-8 shrink-0 object-cover"
+                loading="lazy"
+              />
+              {c.role} ×
+            </button>
+          ))}
         {tab === "video" && (
           <span className="ml-auto shrink-0 font-mono text-[9px] text-muted">
             {startFrame ? "frame A set" : "auto start: latest image"}

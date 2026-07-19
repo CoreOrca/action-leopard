@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { useWorkspace } from "@/lib/store";
 import { useShotScope } from "@/lib/shot-scope";
 import { saveBlobAsAsset } from "@/lib/canvas";
-import { desktopDragProps, downloadAsset } from "@/lib/download";
+import { assetDragProps, downloadAsset } from "@/lib/download";
 import VideoPlayer from "./VideoPlayer";
 
 export default function PreviewPanel({
@@ -187,7 +187,7 @@ export default function PreviewPanel({
             src={selected.url}
             alt={selected.prompt ?? "asset"}
             className="max-h-full max-w-full object-contain"
-            {...desktopDragProps(selected.url)}
+            {...assetDragProps(selected)}
           />
         )}
       </div>
@@ -264,6 +264,7 @@ export default function PreviewPanel({
                   className="h-full w-full cursor-pointer object-cover"
                   loading="lazy"
                   onClick={() => select(a.id)}
+                  {...assetDragProps(a)}
                 />
               )}
               {(startFrameId === a.id || endFrameId === a.id) && (
