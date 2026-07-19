@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useWorkspace } from "@/lib/store";
 import { useShotScope } from "@/lib/shot-scope";
 import { shotGenerationInputs } from "@/lib/scene-agent";
-import { getVideoModel } from "@/lib/models";
+import { getImageModel, getVideoModel } from "@/lib/models";
 
 type PromptTab = "image_a" | "image_b" | "video";
 
@@ -51,10 +51,13 @@ export default function PromptBar({
   const latestCanvasShot = [...assets]
     .reverse()
     .find((a) => a.type === "canvas-shot");
+  // Element images are stored as art-direction assets tagged with element_id —
+  // they are NOT art direction and must never be labeled as such.
   const artDirectionImages = assets
-    .filter((a) => a.type === "art-direction")
+    .filter((a) => a.type === "art-direction" && !a.metadata?.element_id)
     .slice(0, 3);
   const videoModel = getVideoModel(project?.video_model ?? "");
+  const imageModel = getImageModel(project?.image_model ?? "");
 
   /** Candidate input images for the active tab; user can exclude any via chips. */
   const candidates: InputChip[] = useMemo(() => {
@@ -85,7 +88,7 @@ export default function PromptBar({
           list.push({
             key: c.key,
             url: c.url,
-            role: `location — ${loc?.label || "reference"}`,
+            role: loc?.label || "location",
           });
         } else if (c.key === "prev-shot-frame") {
           list.push({
@@ -120,12 +123,30 @@ export default function PromptBar({
         });
       return list;
     }
-    if (scope.referenceUrl)
+    // Unscoped: every input labeled as what it actually is.
+    if (project?.project_type === "scene" && project.location_map?.length) {
+      project.location_map.forEach((l, i) =>
+        list.push({
+          key: `loc-${l.asset_id}`,
+          url: l.url,
+          role: l.label || `Location ${i + 1}`,
+        })
+      );
+    } else if (scope.referenceUrl) {
       list.push({
         key: "reference",
         url: scope.referenceUrl,
         role: "location reference",
       });
+    }
+    elements.forEach((el) => {
+      if (el.image_url)
+        list.push({
+          key: `element:${el.name}`,
+          url: el.image_url,
+          role: `element — ${el.kind}: ${el.name}`,
+        });
+    });
     if (latestCanvasShot)
       list.push({
         key: "canvas",
@@ -136,7 +157,7 @@ export default function PromptBar({
       list.push({
         key: `ad-${a.id}`,
         url: a.url,
-        role: `art direction reference ${i + 1} (style/grade only)`,
+        role: `art direction ${i + 1} (style only)`,
       })
     );
     return list;
@@ -208,7 +229,7 @@ export default function PromptBar({
         body: JSON.stringify({
           projectId,
           prompt: promptText,
-          imageUrls: activeInputs.map((i) => i.url),
+          imageUrls: activeInputs.slice(0, imageModel.maxImages).map((i) => i.url),
           modelId: project.image_model,
           aspectRatio: "16:9",
           metadata: scope.genMetadata(tab === "image_b" ? "end" : "start"),
