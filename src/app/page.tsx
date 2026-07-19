@@ -1,8 +1,15 @@
 import Link from "next/link";
+import HalftoneLeopard from "@/components/HalftoneLeopard";
 
 export default function Home() {
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-background text-foreground">
+    <main className="min-h-screen flex flex-col items-center justify-center bg-background text-foreground px-6">
+      <div
+        className="w-full max-w-md aspect-[2/1] mb-8 md:mb-10"
+        aria-hidden
+      >
+        <HalftoneLeopard />
+      </div>
       <h1 className="font-mono text-2xl md:text-4xl tracking-[0.35em]">
         ACTION LEOPARD
       </h1>
