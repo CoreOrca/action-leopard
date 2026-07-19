@@ -12,6 +12,7 @@ const FILTERS: { key: AssetType | "all"; label: string }[] = [
   { key: "image", label: "Generated images" },
   { key: "video", label: "Videos" },
   { key: "reference", label: "References" },
+  { key: "element", label: "Elements" },
   { key: "art-direction", label: "Art direction" },
   { key: "canvas-shot", label: "Canvas shots" },
   { key: "drawing", label: "Drawings" },

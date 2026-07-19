@@ -12,7 +12,9 @@ export type AssetType =
   | "canvas-shot"
   | "drawing"
   | "reference"
-  | "art-direction";
+  | "art-direction"
+  /** An element's image (character/prop/vehicle) — content reference, never style. */
+  | "element";
 
 export type ProjectType = "shot" | "scene";
 

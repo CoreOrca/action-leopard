@@ -154,7 +154,7 @@ export default function SidePanel({
     try {
       const asset = await saveBlobAsAsset(file, {
         projectId,
-        type: "art-direction",
+        type: "element",
         pathname: `projects/${projectId}/elements/${file.name}`,
         metadata: { element_id: pendingElementId },
       });

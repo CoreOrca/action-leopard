@@ -155,7 +155,11 @@ export async function exportProject(opts: {
   for (const a of assets) {
     const e = extFrom(a.url, a.type === "video" ? "mp4" : "png");
     if (a.type === "reference") add(`inputs/reference/${a.id.slice(0, 8)}.${e}`, a.url);
-    else if (a.type === "art-direction")
+    else if (a.type === "element") {
+      // Live element images are already exported via inputs/elements/ with
+      // kind-name filenames; skip the raw asset rows to avoid duplicates.
+      continue;
+    } else if (a.type === "art-direction")
       add(`inputs/art-direction/${a.id.slice(0, 8)}.${e}`, a.url);
     else if (a.metadata?.shot_id && shotIndex.has(a.metadata.shot_id as string)) {
       const n = String(shotIndex.get(a.metadata.shot_id as string)).padStart(2, "0");

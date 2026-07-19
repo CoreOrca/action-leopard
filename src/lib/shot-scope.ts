@@ -42,6 +42,7 @@ const PALETTE_TYPES = [
   "drawing",
   "reference",
   "art-direction",
+  "element",
 ];
 
 /** Compose the per-shot intent block the prompt writer sees. */
@@ -146,7 +147,7 @@ export function useShotScope(
       return all.filter(
         (a) =>
           a.metadata?.shot_id === shot.id ||
-          ["reference", "art-direction", "canvas-shot"].includes(a.type)
+          ["reference", "art-direction", "element", "canvas-shot"].includes(a.type)
       );
     },
     [shot]

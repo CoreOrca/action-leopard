@@ -52,7 +52,7 @@ export async function duplicateProject(id: string): Promise<string | null> {
       .from("assets")
       .select("*")
       .eq("project_id", id)
-      .in("type", ["reference", "art-direction"])
+      .in("type", ["reference", "art-direction", "element"])
       .order("sort_order"),
   ]);
   const src = p as Project | null;
