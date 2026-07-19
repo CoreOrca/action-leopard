@@ -57,7 +57,23 @@ export default function PreviewPanel({
 
   async function deleteAsset(id: string) {
     if (!confirm("Delete this asset?")) return;
+    const url = assets.find((a) => a.id === id)?.url;
     removeAsset(id);
+    // Mirror the server's dangling-reference cleanup in local state.
+    if (url) {
+      const ws = useWorkspace.getState();
+      ws.setElements(
+        ws.elements.map((el) =>
+          el.image_url === url ? { ...el, image_url: null } : el
+        )
+      );
+      if (ws.project?.location_map?.some((l) => l.url === url))
+        ws.patchProject({
+          location_map: ws.project.location_map.filter((l) => l.url !== url),
+        });
+      if (ws.project?.reference_image_url === url)
+        ws.patchProject({ reference_image_url: null });
+    }
     await fetch("/api/assets/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

@@ -13,6 +13,28 @@ interface FalVideoOutput {
   video: { url: string };
 }
 
+/** Unwrap fal's validation detail so a 422 says WHAT was rejected, not just
+ *  "Unprocessable Entity". */
+function falError(err: unknown): Error {
+  const e = err as { message?: string; body?: { detail?: unknown } };
+  const detail = e?.body?.detail;
+  if (detail) {
+    const text = Array.isArray(detail)
+      ? detail
+          .map((d) => {
+            if (typeof d === "string") return d;
+            const o = d as { loc?: unknown[]; msg?: string };
+            return `${o.loc?.join(".") || "input"}: ${o.msg ?? JSON.stringify(d)}`;
+          })
+          .join("; ")
+      : typeof detail === "string"
+        ? detail
+        : JSON.stringify(detail);
+    return new Error(`fal rejected the request — ${text}`);
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
 async function insertAsset(
   projectId: string,
   fields: Partial<Asset> & { type: Asset["type"]; url: string }
@@ -56,17 +78,46 @@ export async function generateImage(opts: {
   metadata?: Record<string, unknown>;
 }): Promise<Asset[]> {
   const model = getImageModel(opts.modelId);
-  const result = await fal.subscribe(model.falId, {
-    input: {
-      prompt: opts.prompt,
-      image_urls: opts.imageUrls.slice(0, model.maxImages),
-      num_images: 1,
-      resolution: opts.resolution ?? "1K",
-      output_format: "png",
-      ...(opts.aspectRatio ? { aspect_ratio: opts.aspectRatio } : {}),
-    },
-    logs: false,
-  });
+
+  // Pre-flight: drop unreachable inputs (e.g. a deleted blob still referenced
+  // somewhere) instead of letting fal 422 the whole request and kill a run.
+  const requested = opts.imageUrls.slice(0, model.maxImages);
+  const checks = await Promise.all(
+    requested.map(async (url) => {
+      try {
+        const res = await fetch(url, {
+          method: "HEAD",
+          signal: AbortSignal.timeout(5000),
+        });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    })
+  );
+  const inputs = requested.filter((_, i) => checks[i]);
+  const dropped = requested.filter((_, i) => !checks[i]);
+  if (!inputs.length)
+    throw new Error(
+      "No input image is reachable — a referenced image was probably deleted. Re-upload it or remove the stale input."
+    );
+
+  let result;
+  try {
+    result = await fal.subscribe(model.falId, {
+      input: {
+        prompt: opts.prompt,
+        image_urls: inputs,
+        num_images: 1,
+        resolution: opts.resolution ?? "1K",
+        output_format: "png",
+        ...(opts.aspectRatio ? { aspect_ratio: opts.aspectRatio } : {}),
+      },
+      logs: false,
+    });
+  } catch (err) {
+    throw falError(err);
+  }
   const output = result.data as FalImageOutput;
 
   const assets: Asset[] = [];
@@ -86,7 +137,8 @@ export async function generateImage(opts: {
           width: img.width,
           height: img.height,
           description: output.description,
-          input_images: opts.imageUrls,
+          input_images: inputs,
+          ...(dropped.length ? { dropped_inputs: dropped } : {}),
           ...(opts.metadata ?? {}),
         },
       })
@@ -157,7 +209,12 @@ export async function generateVideo(opts: {
     };
   }
 
-  const result = await fal.subscribe(model.falId, { input, logs: false });
+  let result;
+  try {
+    result = await fal.subscribe(model.falId, { input, logs: false });
+  } catch (err) {
+    throw falError(err);
+  }
   const output = result.data as FalVideoOutput;
 
   const blobUrl = await copyToBlob(

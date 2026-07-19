@@ -31,9 +31,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         addRandomSuffix: true,
         tokenPayload: JSON.stringify({ userId: user.id, pathname }),
       }),
-      onUploadCompleted: async () => {
-        // Asset rows are created by the client after upload completes.
-      },
+      // No onUploadCompleted: asset rows are created by the client after the
+      // upload, and the callback needs a public URL (warns on localhost).
     });
     return NextResponse.json(jsonResponse);
   } catch (error) {
