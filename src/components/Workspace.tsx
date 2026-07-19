@@ -201,18 +201,22 @@ function SceneTabs() {
             {v === "shots" ? "Shots" : "Shot detail"}
           </button>
         ))}
+      </div>
+      {/* Center cell: shots-canvas toolbar (portal) in shots view; the
+          scoped shot's number + name in shot detail — never wraps. */}
+      <div className="flex min-w-0 items-center justify-center overflow-hidden">
+        <div id="scene-toolbar-slot" className="flex justify-center" />
         {view === "fixit" && active && (
           <button
             onClick={() => setView("shots")}
-            className="ml-3 min-w-0 truncate font-mono text-[10px] uppercase tracking-wider text-muted hover:text-foreground"
+            className="max-w-[40vw] truncate whitespace-nowrap font-mono text-[10px] uppercase tracking-widest hover:text-muted"
             title="Back to the shots canvas"
           >
-            ◀ Shot {activeIndex}
+            Shot {activeIndex}
             {active.title ? ` — ${active.title}` : ""}
           </button>
         )}
       </div>
-      <div id="scene-toolbar-slot" className="flex justify-center" />
       <ExportButton />
     </div>
   );
