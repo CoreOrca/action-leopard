@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import "tldraw/tldraw.css";
 import { getSnapshot, loadSnapshot, type Editor } from "tldraw";
 import { useWorkspace } from "@/lib/store";
+import { useShotScope } from "@/lib/shot-scope";
 import {
   clearCanvas,
   cutoutsToCanvas,
@@ -48,6 +49,12 @@ export default function CanvasPanel({
 }) {
   const { project, patchProject, addAssets, setBusy, busy, assets } =
     useWorkspace();
+  const {
+    scoped,
+    previewAsset,
+    referenceUrl,
+    intent: scopeIntent,
+  } = useShotScope();
   const editorRef = useRef<Editor | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sceneMode, setSceneMode] = useState<SceneMode>("cutouts");
@@ -109,11 +116,26 @@ export default function CanvasPanel({
     });
   }
 
+  // What ✦ Scene operates on. Scene projects work from whatever the Preview
+  // panel is showing (a shot frame, a location, an upload) — they have no
+  // single reference image. Single-shot projects keep the reference-driven
+  // path unchanged.
+  const isScene = project?.project_type === "scene";
+  const previewImageUrl =
+    previewAsset && previewAsset.type !== "video" ? previewAsset.url : null;
+  const sourceUrl =
+    scoped || isScene
+      ? previewImageUrl ?? referenceUrl
+      : project?.reference_image_url ?? null;
+
   async function translateScene() {
     const editor = editorRef.current;
-    const ref = useWorkspace.getState().project?.reference_image_url;
-    if (!editor || !ref) {
-      alert("Upload a reference image first (left panel).");
+    if (!editor || !sourceUrl) {
+      alert(
+        scoped || isScene
+          ? "Select an image in the preview first."
+          : "Upload a reference image first (left panel)."
+      );
       return;
     }
     setBusy("Reading the location…");
@@ -123,8 +145,8 @@ export default function CanvasPanel({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          imageUrl: ref,
-          intent: useWorkspace.getState().project?.intent ?? "",
+          imageUrl: sourceUrl,
+          intent: scopeIntent,
           mode: translateMode,
         }),
       });
@@ -133,17 +155,29 @@ export default function CanvasPanel({
       const scene = data.scene as SceneTranslation;
 
       if (sceneMode === "traced" || sceneMode === "cutouts") {
-        await buildSegmentedScene(editor, ref, scene, sceneMode, sceneQuality);
+        await buildSegmentedScene(
+          editor,
+          sourceUrl,
+          scene,
+          sceneMode,
+          sceneQuality
+        );
       } else {
         await sceneToCanvas(editor, scene);
       }
 
-      const scene_meta = {
-        summary: scene.summary,
-        scale_anchors: scene.scale_anchors ?? [],
-      };
-      patchProject({ scene_meta });
-      onPatchProject({ scene_meta });
+      // Scoped translations serve one shot — never overwrite the project's
+      // plan-authored scene_meta (summary, anchors, invariants). Unscoped,
+      // merge so scene-project invariants survive.
+      if (!scoped) {
+        const scene_meta = {
+          ...(useWorkspace.getState().project?.scene_meta ?? {}),
+          summary: scene.summary,
+          scale_anchors: scene.scale_anchors ?? [],
+        };
+        patchProject({ scene_meta });
+        onPatchProject({ scene_meta });
+      }
     } catch (err) {
       alert((err as Error).message);
     } finally {
@@ -468,9 +502,13 @@ export default function CanvasPanel({
           </select>
           <button
             onClick={translateScene}
-            disabled={!!busy || !project?.reference_image_url}
+            disabled={!!busy || !sourceUrl}
             className="whitespace-nowrap border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background disabled:opacity-40"
-            title="Translate the reference image into movable objects"
+            title={
+              scoped || isScene
+                ? "Translate the previewed image into movable objects"
+                : "Translate the reference image into movable objects"
+            }
           >
             ✦ Scene
           </button>

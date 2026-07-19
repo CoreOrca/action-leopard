@@ -26,6 +26,9 @@ export interface ShotScope {
   referenceUrl: string | null;
   /** Palette/preview asset filter for the current scope. */
   filterAssets: (assets: Asset[]) => Asset[];
+  /** The asset currently showing in the Preview panel (explicit selection,
+   *  else the scope's default: shot clip → start frame → latest frame). */
+  previewAsset: Asset | null;
   /** Asset metadata for generations, tagging shot versions. Undefined unscoped. */
   genMetadata: (
     role: "start" | "end" | "video"
@@ -71,6 +74,7 @@ export function useShotScope(
     project,
     patchProject,
     assets,
+    selectedAssetId,
     startFrameId,
     endFrameId,
     setStartFrame,
@@ -166,6 +170,38 @@ export function useShotScope(
     [shot, assets]
   );
 
+  // Single source of truth for what the Preview panel is displaying, so the
+  // canvas tools (segmentation, annotate) can target the same image. Scoped:
+  // only honor a selection inside the shot's own set — agent generations for
+  // OTHER shots must never replace what the user is looking at.
+  const previewAsset = useMemo(() => {
+    const selectedRaw = assets.find((a) => a.id === selectedAssetId);
+    if (!shot) {
+      return (
+        selectedRaw ??
+        [...assets].reverse().find((a) => a.type === "image") ??
+        assets[assets.length - 1] ??
+        null
+      );
+    }
+    const images = filterAssets(assets);
+    const inShotSet =
+      selectedRaw && images.some((i) => i.id === selectedRaw.id)
+        ? selectedRaw
+        : undefined;
+    return (
+      inShotSet ??
+      images.find((a) => a.id === shot.video_asset_id) ??
+      images.find((a) => a.id === shot.start_asset_id) ??
+      [...images]
+        .reverse()
+        .find((a) => a.metadata?.shot_id === shot.id && a.type === "image") ??
+      [...images].reverse().find((a) => a.type === "image") ??
+      images[images.length - 1] ??
+      null
+    );
+  }, [assets, selectedAssetId, shot, filterAssets]);
+
   const spec = shot?.spec as Partial<ShotSpec> | undefined;
 
   const referenceUrl = useMemo(() => {
@@ -188,6 +224,7 @@ export function useShotScope(
     assignVideo,
     referenceUrl,
     filterAssets,
+    previewAsset,
     genMetadata,
     intent: shot && project ? shotIntent(project.intent, shot) : project?.intent ?? "",
     sceneMeta: shot

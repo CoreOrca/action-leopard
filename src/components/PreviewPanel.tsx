@@ -14,22 +14,15 @@ export default function PreviewPanel({
   projectId: string;
   onAnnotate: (url: string) => void;
 }) {
+  const { assets, select, addAssets, removeAsset, setBusy } = useWorkspace();
   const {
-    assets,
-    selectedAssetId,
-    select,
-    addAssets,
-    removeAsset,
-    setBusy,
-  } = useWorkspace();
-  const {
-    scoped,
     shot,
     startFrameId,
     endFrameId,
     setStartFrame,
     setEndFrame,
     filterAssets,
+    previewAsset,
   } = useShotScope();
   const uploadInput = useRef<HTMLInputElement>(null);
   /** Full-size player for the previewed video. */
@@ -82,26 +75,9 @@ export default function PreviewPanel({
   }
 
   const images = filterAssets(assets);
-
-  // Scoped: only honor a selection that belongs to this shot's own set —
-  // agent generations for OTHER shots must never replace what the user is
-  // looking at. Default: the shot's clip when it exists (the latest thing
-  // made for the shot), else the marked start frame, else its latest frame.
-  const selectedRaw = assets.find((a) => a.id === selectedAssetId);
-  const selected = scoped
-    ? (selectedRaw && images.some((i) => i.id === selectedRaw.id)
-        ? selectedRaw
-        : undefined) ??
-      images.find((a) => a.id === shot?.video_asset_id) ??
-      images.find((a) => a.id === startFrameId) ??
-      [...images]
-        .reverse()
-        .find((a) => a.metadata?.shot_id === shot?.id && a.type === "image") ??
-      [...images].reverse().find((a) => a.type === "image") ??
-      images[images.length - 1]
-    : selectedRaw ??
-      [...assets].reverse().find((a) => a.type === "image") ??
-      assets[assets.length - 1];
+  // Selection + scoped fallbacks resolved in useShotScope, shared with the
+  // canvas tools so ✦ Scene targets exactly what's showing here.
+  const selected = previewAsset ?? undefined;
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col border border-border-soft">
