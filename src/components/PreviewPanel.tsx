@@ -5,6 +5,7 @@ import { useWorkspace } from "@/lib/store";
 import { useShotScope } from "@/lib/shot-scope";
 import { saveBlobAsAsset } from "@/lib/canvas";
 import { desktopDragProps, downloadAsset } from "@/lib/download";
+import VideoPlayer from "./VideoPlayer";
 
 export default function PreviewPanel({
   projectId,
@@ -157,12 +158,11 @@ export default function PreviewPanel({
             Nothing yet — upload a reference or generate.
           </p>
         ) : selected.type === "video" ? (
-          /* eslint-disable-next-line jsx-a11y/media-has-caption */
-          <video
+          <VideoPlayer
             key={selected.id}
             src={selected.url}
-            controls
-            className="max-h-full max-w-full"
+            className="flex h-full w-full flex-col"
+            videoClassName="min-h-0 w-full flex-1"
           />
         ) : (
           /* eslint-disable-next-line @next/next/no-img-element */
@@ -288,13 +288,7 @@ export default function PreviewPanel({
             className="w-full max-w-5xl border border-border bg-background p-2"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-            <video
-              src={enlarged}
-              controls
-              autoPlay
-              className="max-h-[80vh] w-full"
-            />
+            <VideoPlayer src={enlarged} autoPlay />
             <div className="mt-2 flex justify-end">
               <button
                 onClick={() => setEnlarged(null)}

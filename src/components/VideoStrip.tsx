@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useWorkspace } from "@/lib/store";
 import { useSceneAgent } from "@/lib/scene-store";
+import VideoPlayer from "./VideoPlayer";
 import type { Asset } from "@/lib/types";
 
 export default function VideoStrip() {
@@ -141,18 +142,15 @@ export default function VideoStrip() {
             className="w-full max-w-5xl border border-border bg-background p-2"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-            <video
+            <VideoPlayer
               key={videos[seqIndex].id}
               src={videos[seqIndex].url}
-              controls
               autoPlay
               onEnded={() =>
                 setSeqIndex((i) =>
                   i !== null && i + 1 < videos.length ? i + 1 : null
                 )
               }
-              className="max-h-[80vh] w-full"
             />
             <div className="mt-2 flex items-center justify-between">
               <span className="font-mono text-[10px] text-muted">
@@ -198,8 +196,7 @@ export default function VideoStrip() {
             className="max-h-[85vh] w-full max-w-4xl border border-border bg-background p-2"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-            <video src={playing.url} controls autoPlay className="w-full" />
+            <VideoPlayer src={playing.url} autoPlay />
             <div className="mt-2 flex items-center justify-between">
               <span className="max-w-[70%] truncate font-mono text-[10px] text-muted">
                 {playing.model} · {playing.prompt?.slice(0, 120)}

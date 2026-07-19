@@ -7,6 +7,7 @@ import { useSceneAgent } from "@/lib/scene-store";
 import { insertShot, deleteShot, reorderShots } from "@/lib/shots";
 import { uploadShotStartFrame, acceptShot, makeVideos } from "@/lib/scene-agent";
 import { desktopDragProps, downloadAsset } from "@/lib/download";
+import VideoPlayer from "./VideoPlayer";
 import type { Shot } from "@/lib/types";
 
 const COLS = 4;
@@ -462,13 +463,7 @@ export default function ShotsCanvas({
             className="w-full max-w-5xl border border-border bg-background p-2"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-            <video
-              src={playing.url}
-              controls
-              autoPlay
-              className="max-h-[80vh] w-full"
-            />
+            <VideoPlayer src={playing.url} autoPlay />
             <div className="mt-2 flex items-center justify-between">
               <span className="truncate font-mono text-[10px] text-muted">
                 {playing.title}
