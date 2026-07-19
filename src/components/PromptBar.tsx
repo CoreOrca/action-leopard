@@ -50,9 +50,14 @@ export default function PromptBar({
   const [extras, setExtras] = useState<InputChip[]>([]);
   const [dropActive, setDropActive] = useState(false);
 
-  // Dragged-in inputs are per-shot working aids — clear them on scope change.
+  // Dragged-in and removed inputs are per-shot working aids — clear both on
+  // scope change (removal keys like "location" are shared across shots, so a
+  // stale set would silently drop inputs on every other shot).
   const scopedShotId = scope.shot?.id ?? null;
-  useEffect(() => setExtras([]), [scopedShotId]);
+  useEffect(() => {
+    setExtras([]);
+    setExcluded(new Set());
+  }, [scopedShotId]);
 
   const startFrame = assets.find((a) => a.id === scope.startFrameId);
   const endFrame = assets.find((a) => a.id === scope.endFrameId);
@@ -181,6 +186,10 @@ export default function PromptBar({
   // the image tabs.
   const allChips = tab === "video" ? candidates : [...candidates, ...extras];
   const activeInputs = allChips.filter((c) => !excluded.has(c.key));
+  // Removed chips leave the rail entirely; ↺ (or dragging the image back)
+  // restores them.
+  const visibleCandidates = candidates.filter((c) => !excluded.has(c.key));
+  const removedCandidates = candidates.filter((c) => excluded.has(c.key));
 
   function handleAssetDrop(e: React.DragEvent) {
     const raw = e.dataTransfer.getData(ASSET_DRAG_MIME);
@@ -190,12 +199,20 @@ export default function PromptBar({
     try {
       const a = JSON.parse(raw) as { id: string; url: string; type: string };
       if (a.type === "video") return;
+      // Already a known input: bring it back if it was removed, else no-op —
+      // a drop must never silently vanish.
+      const match = candidates.find((c) => c.url === a.url);
+      if (match) {
+        setExcluded((prev) => {
+          if (!prev.has(match.key)) return prev;
+          const next = new Set(prev);
+          next.delete(match.key);
+          return next;
+        });
+        return;
+      }
       setExtras((prev) => {
-        if (
-          prev.some((c) => c.url === a.url) ||
-          candidates.some((c) => c.url === a.url)
-        )
-          return prev;
+        if (prev.some((c) => c.url === a.url)) return prev;
         const role =
           a.type === "canvas-shot"
             ? "canvas shot (added)"
@@ -424,42 +441,30 @@ export default function PromptBar({
         onDrop={handleAssetDrop}
       >
         <span className="shrink-0 font-mono text-[9px] uppercase text-muted">inputs:</span>
-        {candidates.length === 0 && extras.length === 0 ? (
+        {visibleCandidates.length === 0 && extras.length === 0 ? (
           <span className="shrink-0 font-mono text-[9px] text-muted">
             none — drag a thumbnail here
           </span>
         ) : (
-          candidates.map((c) => {
-            const off = excluded.has(c.key);
-            return (
-              <button
-                key={c.key}
-                onClick={() =>
-                  setExcluded((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(c.key)) next.delete(c.key);
-                    else next.add(c.key);
-                    return next;
-                  })
-                }
-                className={`flex shrink-0 items-center gap-1 whitespace-nowrap border py-0.5 pl-0.5 pr-1.5 font-mono text-[9px] ${
-                  off
-                    ? "border-border-soft text-muted line-through opacity-50"
-                    : "border-border"
-                }`}
-                title={off ? "Click to include" : "Click to exclude"}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={c.url}
-                  alt=""
-                  className="h-5 w-8 shrink-0 object-cover"
-                  loading="lazy"
-                />
-                {c.role} {off ? "" : "×"}
-              </button>
-            );
-          })
+          visibleCandidates.map((c) => (
+            <button
+              key={c.key}
+              onClick={() =>
+                setExcluded((prev) => new Set(prev).add(c.key))
+              }
+              className="flex shrink-0 items-center gap-1 whitespace-nowrap border border-border py-0.5 pl-0.5 pr-1.5 font-mono text-[9px]"
+              title="Remove from inputs (↺ or drag it back to restore)"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={c.url}
+                alt=""
+                className="h-5 w-8 shrink-0 object-cover"
+                loading="lazy"
+              />
+              {c.role} ×
+            </button>
+          ))
         )}
         {tab !== "video" &&
           extras.map((c) => (
@@ -481,6 +486,21 @@ export default function PromptBar({
               {c.role} ×
             </button>
           ))}
+        {removedCandidates.length > 0 && (
+          <button
+            onClick={() =>
+              setExcluded((prev) => {
+                const next = new Set(prev);
+                removedCandidates.forEach((c) => next.delete(c.key));
+                return next;
+              })
+            }
+            className="shrink-0 whitespace-nowrap border border-border-soft px-1.5 py-0.5 font-mono text-[9px] text-muted hover:border-border hover:text-foreground"
+            title="Bring back the removed inputs"
+          >
+            ↺ {removedCandidates.length} removed
+          </button>
+        )}
         {tab === "video" && (
           <span className="ml-auto shrink-0 font-mono text-[9px] text-muted">
             {startFrame ? "frame A set" : "auto start: latest image"}
