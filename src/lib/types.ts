@@ -24,6 +24,11 @@ export interface LocationMapEntry {
   url: string;
   label: string;
   notes?: string;
+  /**
+   * Starred as the scene overview: the image showing the whole location, used
+   * by every shot for orientation and background truth (at most one entry).
+   */
+  overview?: boolean;
 }
 
 export interface Project {

@@ -100,6 +100,7 @@ export async function planScene(): Promise<void> {
           url: l.url,
           label: l.label,
           notes: l.notes,
+          overview: l.overview,
         })),
         elements: elements.map((e) => ({
           kind: e.kind,
@@ -224,6 +225,17 @@ function buildInputs(
     project.location_map?.find((l) => l.asset_id === shot.location_asset_id) ??
     project.location_map?.[0];
   if (loc) list.push({ key: "location", url: loc.url, role: "location reference photo — geography, architecture and light truth" });
+
+  // The starred scene overview rides along on EVERY shot: it shows the whole
+  // location so backgrounds and orientation stay true, but it is never the
+  // shot's own set or framing.
+  const overview = project.location_map?.find((l) => l.overview);
+  if (overview && overview.asset_id !== loc?.asset_id)
+    list.push({
+      key: "location-overview",
+      url: overview.url,
+      role: "scene overview reference — the whole location; background structures and orientation truth only, never this shot's set or framing",
+    });
 
   const prevUrl = prevApprovedFrameUrl(shot.id);
   if (prevUrl)

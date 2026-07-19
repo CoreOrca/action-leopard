@@ -90,6 +90,12 @@ export default function PromptBar({
             url: c.url,
             role: loc?.label || "location",
           });
+        } else if (c.key === "location-overview") {
+          list.push({
+            key: c.key,
+            url: c.url,
+            role: "scene overview (orientation)",
+          });
         } else if (c.key === "prev-shot-frame") {
           list.push({
             key: c.key,

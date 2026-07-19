@@ -9,7 +9,13 @@ interface PlanBody {
   script: string;
   intent?: string;
   artDirection?: string;
-  locations: { url: string; label?: string; notes?: string }[];
+  locations: {
+    url: string;
+    label?: string;
+    notes?: string;
+    /** Starred scene overview — shows the whole location for orientation. */
+    overview?: boolean;
+  }[];
   elements?: { kind: string; name: string; notes: string }[];
 }
 
@@ -33,6 +39,9 @@ export async function POST(request: Request) {
           .join("\n")}`
       : "",
     `LOCATION IMAGES: ${body.locations.length} attached below, IN PATH ORDER. Use 0-based location_index to map shots to them.`,
+    body.locations.some((l) => l.overview)
+      ? `SCENE OVERVIEW: the location marked SCENE OVERVIEW shows the whole location at once. It is attached to EVERY shot's generation as an extra reference (right after the mapped location photo) — use it in each image_a_prompt for orientation and background truth (which structures surround the action, what the skyline behind it is), never as the shot's own set or framing.`
+      : "",
   ].filter(Boolean);
 
   const content: ChatContent = [{ type: "text", text: lines.join("\n\n") }];
@@ -41,7 +50,7 @@ export async function POST(request: Request) {
       type: "text",
       text: `LOCATION ${i}${loc.label ? ` — ${loc.label}` : ""}${
         loc.notes ? ` (${loc.notes})` : ""
-      }:`,
+      }${loc.overview ? " [SCENE OVERVIEW — shows the whole location]" : ""}:`,
     });
     content.push({
       type: "image_url",

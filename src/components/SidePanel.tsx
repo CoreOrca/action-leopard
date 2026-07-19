@@ -83,6 +83,16 @@ export default function SidePanel({
     saveLocationMap(next);
   }
 
+  /** Star one location as the scene overview (whole-location orientation image). */
+  function toggleOverview(index: number) {
+    if (!project) return;
+    const next = (project.location_map ?? []).map((l, j) => ({
+      ...l,
+      overview: j === index ? !l.overview : false,
+    }));
+    saveLocationMap(next);
+  }
+
   async function uploadReference(file: File) {
     setBusy("Uploading reference…");
     try {
@@ -257,6 +267,21 @@ export default function SidePanel({
                   }}
                   className="min-w-0 flex-1 bg-transparent text-[10px] outline-none"
                 />
+                <button
+                  onClick={() => toggleOverview(i)}
+                  className={`px-0.5 font-mono text-[11px] ${
+                    loc.overview
+                      ? "text-foreground"
+                      : "text-muted opacity-0 hover:opacity-100 group-hover:opacity-60"
+                  }`}
+                  title={
+                    loc.overview
+                      ? "Scene overview — attached to every shot for orientation and backgrounds"
+                      : "Star as scene overview (the image showing the whole location)"
+                  }
+                >
+                  {loc.overview ? "★" : "☆"}
+                </button>
                 <div className="hidden items-center gap-0.5 group-hover:flex">
                   <button
                     onClick={() => moveLocation(i, -1)}
@@ -289,6 +314,13 @@ export default function SidePanel({
               </div>
             ))}
           </div>
+          {(project.location_map?.length ?? 0) > 1 &&
+            !project.location_map.some((l) => l.overview) && (
+              <p className="mt-1 font-mono text-[9px] text-muted">
+                ☆ star the image that shows the whole location — it grounds
+                every shot&apos;s backdrop
+              </p>
+            )}
           <button
             onClick={() => locInput.current?.click()}
             className="mt-1 w-full border border-border px-2 py-2 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background"
