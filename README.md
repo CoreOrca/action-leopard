@@ -114,7 +114,3 @@ Migrations live in `supabase/migrations/`. They have already been applied to the
 - **Shot framing / 360° camera**: stickers + empty plate + instance atlas form a world package ready to be lifted into an explorable 3-D blocking view (SAM 3 3D-objects is earmarked for this), plus drawn camera trajectories.
 - **Canvas animation → guide video**: record object motion on the canvas as a video input for motion-control / video-input models.
 - Multi-image location paths drawn across a larger map; agent-driven canvas blocking when the judge suggests it; Google OAuth; payments.
-
-## Credits caution
-
-fal credits are limited. Nothing generates without an explicit click or confirmation: scene runs sit behind a plan-approval gate, end frames and videos behind their own confirmations, and the judge/fix loop has a hard cap on automatic retries. A judge failure that cites no failed checks counts as a pass — an inconsistent verdict never burns credits.
