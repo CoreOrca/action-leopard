@@ -570,6 +570,18 @@ async function processShot(
 }
 
 /**
+ * Settle the phase from shot statuses after a user escalation action — unless
+ * the run loop is live: it owns the phase (computeResume reads "paused" from
+ * any mid-flight shot, which would flip the panel to "needs you" while the
+ * loop is still working) and settles it itself when it finishes.
+ */
+function settlePhaseUnlessRunning(): void {
+  const scene = useSceneAgent.getState();
+  if (scene.phase === "running") return;
+  scene.setPhase(computeResume(scene.shots).phase);
+}
+
+/**
  * Approve and run shots through the generate → judge → fix loop.
  * Strictly sequential in sort order; every transition is persisted.
  */
@@ -940,7 +952,7 @@ export async function acceptShot(shotId: string): Promise<void> {
     shotId,
     text: `${shotLabel(shotId)}: accepted as-is.`,
   });
-  scene.setPhase(computeResume(useSceneAgent.getState().shots).phase);
+  settlePhaseUnlessRunning();
 }
 
 /**
@@ -961,7 +973,7 @@ export async function approveShotFrame(
     text: `${shotLabel(shotId)}: approved v${asset?.metadata?.version ?? "?"}.`,
     imageUrl: asset?.url,
   });
-  scene.setPhase(computeResume(useSceneAgent.getState().shots).phase);
+  settlePhaseUnlessRunning();
 }
 
 /** User supplies their own start frame for a shot; the shot is accepted. */
@@ -993,7 +1005,7 @@ export async function uploadShotStartFrame(
     text: `${shotLabel(shotId)}: using your uploaded frame.`,
     imageUrl: asset.url,
   });
-  scene.setPhase(computeResume(useSceneAgent.getState().shots).phase);
+  settlePhaseUnlessRunning();
 }
 
 /** Derive the loop phase from persisted shot statuses (resume after refresh). */
