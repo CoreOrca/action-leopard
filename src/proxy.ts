@@ -32,8 +32,10 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isProtected = pathname.startsWith("/studio") || pathname.startsWith("/api");
   const isAuthApi = pathname.startsWith("/api/auth");
+  // Stripe calls this with a signature, not a session cookie.
+  const isStripeWebhook = pathname.startsWith("/api/stripe/webhook");
 
-  if (!user && isProtected && !isAuthApi) {
+  if (!user && isProtected && !isAuthApi && !isStripeWebhook) {
     if (pathname.startsWith("/api")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

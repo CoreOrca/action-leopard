@@ -20,6 +20,13 @@ Next.js App Router app for **spatial control of AI-generated action video**: tra
 - All keys in `.env.local` (gitignored). **fal credits are LIMITED** — never generate media in testing without asking; cheap LLM smoke tests are fine.
 - Supabase email confirmation is disabled (no SMTP); signup logs straight in. `/auth/confirm` handles both `?code=` and `token_hash` flows for when it's re-enabled.
 
+## Billing & access (migration 00008)
+
+- Stripe subscriptions (live account, server-only — no stripe.js/publishable key in the client): Starter $19.99/100 credits, Creator $99/600, Pro $299/2000 monthly. `src/lib/plans.ts` holds plan + credit config (image 5, segment 4, video 10–32 per 5s by model — calibrated against real fal/LLM COGS for ~70% gross margin at full burn; scene-loop judge/fix LLM overhead is absorbed into the image credit, LLM-only routes are unmetered).
+- Products/prices resolved by lookup_key `al_{starter,creator,pro}_monthly`; `scripts/stripe-setup.mjs` (idempotent) creates them + the `actionleopard.com/api/stripe/webhook` endpoint and writes `STRIPE_WEBHOOK_SECRET` to `.env.local`.
+- Routes: `GET /api/billing/checkout?plan=` (Checkout redirect), `GET /api/billing/portal`, `GET /api/billing/sync` (Checkout success return — applies the sub immediately so webhook lag can't strand a new subscriber), `POST /api/stripe/webhook` (signature-verified; exempted from the auth wall in `src/proxy.ts`).
+- Entitlements (`src/lib/entitlements.ts`): `ACCESS_ALLOWLIST` env (comma-separated emails) grants unmetered comp access (founders/demo users) with zero Stripe state; otherwise the `billing` row (written only via service key from webhook/sync) + `usage_events` (RLS, summed by `usage_total()` RPC over the Stripe period). `assertCredits`/`recordUsage` gate `generateImage`/`generateVideo` (covers generate routes, agent loop, scene/world) and `scene/segment`; EntitlementError → HTTP 402 with a human message. `/studio/*` is gated by `src/app/studio/layout.tsx` → redirects unentitled users to `/pricing`.
+
 ## Model registry (`src/lib/models.ts`)
 
 - Image: `nano-banana-pro` (`fal-ai/gemini-3-pro-image-preview/edit`), `nano-banana-2` (`fal-ai/nano-banana-2/edit`) — both `maxImages: 14`; send the inputs a shot needs, never artificially fewer.

@@ -167,6 +167,12 @@ export default function TopBar({
               >
                 Projects
               </Link>
+              <Link
+                href="/pricing"
+                className="block px-3 py-2 font-mono text-[11px] uppercase tracking-wider hover:bg-foreground hover:text-background"
+              >
+                Billing
+              </Link>
               <button
                 onClick={signOut}
                 className="block w-full px-3 py-2 text-left font-mono text-[11px] uppercase tracking-wider hover:bg-foreground hover:text-background"

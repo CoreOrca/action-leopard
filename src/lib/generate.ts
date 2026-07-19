@@ -2,6 +2,8 @@ import { fal } from "./fal";
 import { copyToBlob } from "./blob";
 import { getImageModel, getVideoModel } from "./models";
 import { createClient } from "./supabase/server";
+import { assertCredits, recordUsage } from "./entitlements";
+import { IMAGE_CREDITS, videoCredits } from "./plans";
 import type { Asset } from "./types";
 
 interface FalImageOutput {
@@ -78,6 +80,7 @@ export async function generateImage(opts: {
   metadata?: Record<string, unknown>;
 }): Promise<Asset[]> {
   const model = getImageModel(opts.modelId);
+  await assertCredits(IMAGE_CREDITS);
 
   // Pre-flight: drop unreachable inputs (e.g. a deleted blob still referenced
   // somewhere) instead of letting fal 422 the whole request and kill a run.
@@ -119,6 +122,12 @@ export async function generateImage(opts: {
     throw falError(err);
   }
   const output = result.data as FalImageOutput;
+  await recordUsage(
+    "image",
+    opts.modelId,
+    IMAGE_CREDITS * Math.max(1, output.images.length),
+    { project_id: opts.projectId }
+  );
 
   const assets: Asset[] = [];
   for (const img of output.images) {
@@ -159,6 +168,8 @@ export async function generateVideo(opts: {
   metadata?: Record<string, unknown>;
 }): Promise<Asset> {
   const model = getVideoModel(opts.modelId);
+  const cost = videoCredits(opts.modelId, opts.duration);
+  await assertCredits(cost);
 
   let input: Record<string, unknown>;
   if (model.falId.includes("grok-imagine")) {
@@ -216,6 +227,10 @@ export async function generateVideo(opts: {
     throw falError(err);
   }
   const output = result.data as FalVideoOutput;
+  await recordUsage("video", opts.modelId, cost, {
+    project_id: opts.projectId,
+    duration: opts.duration ?? null,
+  });
 
   const blobUrl = await copyToBlob(
     output.video.url,

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { fal } from "@/lib/fal";
+import { assertCredits, recordUsage, EntitlementError } from "@/lib/entitlements";
+import { SEGMENT_CREDITS } from "@/lib/plans";
 
 export const maxDuration = 300;
 
@@ -147,6 +149,15 @@ export async function POST(request: Request) {
     );
   }
 
+  try {
+    await assertCredits(SEGMENT_CREDITS);
+  } catch (err) {
+    return NextResponse.json(
+      { error: (err as Error).message },
+      { status: err instanceof EntitlementError ? 402 : 500 }
+    );
+  }
+
   const capped = boxes.slice(0, MAX_OBJECTS);
   const results: { id: string; maskUrl: string | null }[] = [];
 
@@ -222,6 +233,10 @@ export async function POST(request: Request) {
       );
     });
   }
+
+  await recordUsage("segment", "sam-3-1", SEGMENT_CREDITS, {
+    objects: capped.length,
+  });
 
   return NextResponse.json({
     masks: results,
