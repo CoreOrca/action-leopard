@@ -3,7 +3,7 @@ import Link from "next/link";
 export default function Home() {
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-background text-foreground px-6">
-      <div className="relative w-full max-w-lg mb-8 md:mb-10" aria-hidden>
+      <div className="relative w-full max-w-xs mb-8 md:mb-10" aria-hidden>
         {/* Light mode: black dots on white */}
         <img
           src="/light_mode_leopard.png"
