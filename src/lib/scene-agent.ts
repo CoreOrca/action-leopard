@@ -402,6 +402,7 @@ async function judgeFrame(
         spec,
         version: shot.revision_count + 1,
         promptUsed: shot.prompts.image_a,
+        scriptExcerpt: shot.script_excerpt,
       },
       frameUrl: frame.url,
       locationUrl: loc?.url,
@@ -482,6 +483,9 @@ async function processShot(
 ): Promise<void> {
   const scene = useSceneAgent.getState();
   const overrides = { add: new Set<string>(), remove: new Set<string>() };
+  // Unparseable judge replies re-judge (free) instead of burning a
+  // generation + fix on a verdict that never existed.
+  let judgeRetries = 0;
 
   // Safety bound: gen+judge+fix cycles can never exceed the fix cap; the
   // counter guards against a stuck status ping-ponging forever.
@@ -499,6 +503,24 @@ async function processShot(
 
     if (shot.status === "judging") {
       const verdict = await judgeFrame(project, shotId);
+      if (verdict.unparseable) {
+        if (judgeRetries < 2) {
+          judgeRetries++;
+          scene.pushEvent({
+            kind: "info",
+            shotId,
+            text: `${shotLabel(shotId)}: judge reply was unreadable — re-running the review (${judgeRetries}/2)…`,
+          });
+          continue; // status stays "judging" → re-judge; no credits spent
+        }
+        await persistShot(shotId, { status: "escalated" });
+        scene.pushEvent({
+          kind: "escalate",
+          shotId,
+          text: `${shotLabel(shotId)}: needs your call — the judge couldn't return a readable verdict. The frame may be fine; approve it, retry, or open shot detail.`,
+        });
+        return;
+      }
       if (verdict.pass) {
         await persistShot(shotId, { status: "passed" });
         scene.pushEvent({

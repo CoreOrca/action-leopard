@@ -60,6 +60,10 @@ export async function reviewChat(opts: {
         : {}),
     });
     if (res.stop_reason === "refusal") throw new Error("review model refused");
+    // Thinking counts against max_tokens; a truncated reply is unparseable
+    // garbage — throw so the caller's retry loop runs instead of parsing it.
+    if (res.stop_reason === "max_tokens")
+      throw new Error("review model output truncated (max_tokens)");
     const text = res.content.find((b) => b.type === "text")?.text ?? "";
     if (!text.trim()) throw new Error("review model returned no text");
     return text;

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useWorkspace } from "@/lib/store";
 import { useShotScope } from "@/lib/shot-scope";
+import { shotGenerationInputs } from "@/lib/scene-agent";
 import { getVideoModel } from "@/lib/models";
 
 type PromptTab = "image_a" | "image_b" | "video";
@@ -71,6 +72,54 @@ export default function PromptBar({
     } else if (startFrame) {
       list.push({ key: "frame-a", url: startFrame.url, role: "frame A (start)" });
     }
+    if (scope.shot && project) {
+      // Scene shot: the exact generator inputs the agent loop uses, with
+      // specific labels — which location, which elements, which references.
+      const loc =
+        project.location_map?.find(
+          (l) => l.asset_id === scope.shot!.location_asset_id
+        ) ?? project.location_map?.[0];
+      let ad = 0;
+      for (const c of shotGenerationInputs(project, scope.shot)) {
+        if (c.key === "location") {
+          list.push({
+            key: c.key,
+            url: c.url,
+            role: `location — ${loc?.label || "reference"}`,
+          });
+        } else if (c.key === "prev-shot-frame") {
+          list.push({
+            key: c.key,
+            url: c.url,
+            role: "prev shot frame (continuity)",
+          });
+        } else if (c.key === "art-direction") {
+          ad += 1;
+          list.push({
+            key: `art-direction-${ad}`,
+            url: c.url,
+            role: `art direction ${ad} (style only)`,
+          });
+        } else if (c.key.startsWith("element:")) {
+          const name = c.key.slice("element:".length);
+          const el = elements.find((e) => e.name === name);
+          list.push({
+            key: c.key,
+            url: c.url,
+            role: `element — ${el ? `${el.kind}: ${el.name}` : name}`,
+          });
+        } else {
+          list.push(c);
+        }
+      }
+      if (latestCanvasShot)
+        list.push({
+          key: "canvas",
+          url: latestCanvasShot.url,
+          role: "canvas blocking diagram (positions only)",
+        });
+      return list;
+    }
     if (scope.referenceUrl)
       list.push({
         key: "reference",
@@ -91,7 +140,7 @@ export default function PromptBar({
       })
     );
     return list;
-  }, [tab, startFrame, endFrame, scope.referenceUrl, latestCanvasShot, artDirectionImages]);
+  }, [tab, startFrame, endFrame, scope.shot, project, elements, scope.referenceUrl, latestCanvasShot, artDirectionImages]);
 
   const activeInputs = candidates.filter((c) => !excluded.has(c.key));
 
@@ -292,10 +341,11 @@ export default function PromptBar({
         className="w-full resize-y bg-transparent p-2 font-mono text-xs leading-relaxed outline-none"
       />
 
-      <div className="flex flex-wrap items-center gap-1 border-t border-border-soft px-2 py-1">
-        <span className="font-mono text-[9px] uppercase text-muted">inputs:</span>
+      {/* One row, horizontal scroll — adding inputs never wraps or resizes. */}
+      <div className="flex items-center gap-1 overflow-x-auto border-t border-border-soft px-2 py-1">
+        <span className="shrink-0 font-mono text-[9px] uppercase text-muted">inputs:</span>
         {candidates.length === 0 ? (
-          <span className="font-mono text-[9px] text-muted">none available</span>
+          <span className="shrink-0 font-mono text-[9px] text-muted">none available</span>
         ) : (
           candidates.map((c) => {
             const off = excluded.has(c.key);
@@ -310,20 +360,27 @@ export default function PromptBar({
                     return next;
                   })
                 }
-                className={`border px-1.5 py-0.5 font-mono text-[9px] ${
+                className={`flex shrink-0 items-center gap-1 whitespace-nowrap border py-0.5 pl-0.5 pr-1.5 font-mono text-[9px] ${
                   off
                     ? "border-border-soft text-muted line-through opacity-50"
                     : "border-border"
                 }`}
                 title={off ? "Click to include" : "Click to exclude"}
               >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={c.url}
+                  alt=""
+                  className="h-5 w-8 shrink-0 object-cover"
+                  loading="lazy"
+                />
                 {c.role} {off ? "" : "×"}
               </button>
             );
           })
         )}
         {tab === "video" && (
-          <span className="ml-auto font-mono text-[9px] text-muted">
+          <span className="ml-auto shrink-0 font-mono text-[9px] text-muted">
             {startFrame ? "frame A set" : "auto start: latest image"}
             {videoModel.supportsEndFrame && endFrame ? " + frame B" : ""}
           </span>

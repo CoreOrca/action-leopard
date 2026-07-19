@@ -69,6 +69,8 @@ interface JudgeBody {
     spec: Partial<ShotSpec>;
     version: number;
     promptUsed?: string;
+    /** The script lines this shot must stage — checked element by element. */
+    scriptExcerpt?: string;
   };
   frameUrl: string;
   locationUrl?: string;
@@ -105,6 +107,9 @@ export async function POST(request: Request) {
           .join("\n")}`
       : "",
     `SPEC:\n${JSON.stringify(spec, null, 2)}`,
+    body.shot.scriptExcerpt?.trim()
+      ? `SCRIPT EXCERPT (the beat this frame must stage — every concrete requirement in it is checkable):\n${body.shot.scriptExcerpt.trim()}`
+      : "",
     body.nextEntry
       ? `NEXT SHOT'S ENTRY STATE (the action must be headed here): ${body.nextEntry}`
       : "",
@@ -142,32 +147,37 @@ export async function POST(request: Request) {
   }
 
   let verdict: JudgeVerdict | null = null;
-  for (let attempt = 0; attempt < 2 && !verdict; attempt++) {
+  for (let attempt = 0; attempt < 3 && !verdict; attempt++) {
     try {
       // Claude Sonnet 5 judges (independent of the grok planner); grok fallback
-      // when no ANTHROPIC_API_KEY is configured.
+      // when no ANTHROPIC_API_KEY is configured. Generous token budget: the
+      // model's thinking counts against max_tokens, and a truncated reply is
+      // what produces unparseable verdicts.
       const raw = await reviewChat({
         system,
         content,
-        maxTokens: 8192,
+        maxTokens: 16384,
         temperature: 0.2,
         jsonSchema: VERDICT_SCHEMA,
       });
       verdict = extractJson<JudgeVerdict>(raw);
     } catch {
-      // retry once; fall through to synthetic verdict after
+      // retry; fall through to synthetic verdict after
     }
   }
   if (!verdict) {
+    // Marked unparseable so the run loop re-judges instead of burning a
+    // generation + fix on a verdict that never existed.
     verdict = {
       version: body.shot.version,
+      unparseable: true,
       pass: false,
       checks: [],
-      summary: "Judge reply was unparseable — treating as a failed review.",
+      summary: "Judge reply was unparseable — review did not complete.",
       fix: {
         strategy: "revise-prompt",
         notes:
-          "Judge output could not be parsed; rewrite the prompt restating every invariant and scale anchor as hard instructions.",
+          "Judge output could not be parsed; re-run the review rather than acting on this verdict.",
       },
     };
   }

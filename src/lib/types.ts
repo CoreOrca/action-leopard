@@ -194,6 +194,9 @@ export interface JudgeFix {
 export interface JudgeVerdict {
   /** Which frame version was judged (1 = first generation). */
   version: number;
+  /** True when the judge never returned readable JSON — the loop re-judges
+   *  instead of spending a generation + fix on a verdict that never existed. */
+  unparseable?: boolean;
   /** The judge's observe-first pass: visible faces, landmark edges, obstacles. */
   observed?: string;
   pass: boolean;

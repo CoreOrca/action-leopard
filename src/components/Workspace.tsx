@@ -15,7 +15,6 @@ import PromptBar from "./PromptBar";
 import VideoStrip from "./VideoStrip";
 import AgentModal from "./AgentModal";
 import ShotsCanvas from "./ShotsCanvas";
-import ShotInputs from "./ShotInputs";
 import SceneAgentPanel from "./SceneAgentPanel";
 import {
   planScene,
@@ -147,7 +146,6 @@ export default function Workspace({ projectId }: { projectId: string }) {
               />
               <PreviewPanel projectId={projectId} onAnnotate={onAnnotate} />
             </div>
-            <ShotInputs />
             <PromptBar projectId={projectId} onPatchProject={patchProject} />
             <VideoStrip />
           </FixitPane>
@@ -214,7 +212,44 @@ function SceneTabs() {
         )}
       </div>
       <div id="scene-toolbar-slot" className="flex justify-center" />
-      <div />
+      <ExportButton />
+    </div>
+  );
+}
+
+/** Downloads a zip: every asset in organized folders + prompts.md. */
+function ExportButton() {
+  const busy = useWorkspace((s) => s.busy);
+  async function exportNow() {
+    const { project, elements, assets, setBusy } = useWorkspace.getState();
+    const shots = useSceneAgent.getState().shots;
+    if (!project) return;
+    setBusy("Packing export…");
+    try {
+      const { exportProject } = await import("@/lib/export");
+      await exportProject({
+        project,
+        shots,
+        elements,
+        assets,
+        onProgress: (m) => useWorkspace.getState().setBusy(m),
+      });
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      useWorkspace.getState().setBusy(null);
+    }
+  }
+  return (
+    <div className="flex justify-end">
+      <button
+        onClick={exportNow}
+        disabled={!!busy}
+        className="border border-border-soft px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-muted hover:border-border hover:text-foreground disabled:opacity-40"
+        title="Download the project as a zip — inputs, per-shot frames and clips, generated media, and prompts.md"
+      >
+        ⤓ Export
+      </button>
     </div>
   );
 }

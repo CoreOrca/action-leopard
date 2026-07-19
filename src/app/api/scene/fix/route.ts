@@ -60,10 +60,12 @@ export async function POST(request: Request) {
   try {
     // Claude Sonnet 5 rewrites (independent of the grok planner); grok
     // fallback when no ANTHROPIC_API_KEY is configured.
+    // Generous budget: the model's thinking counts against max_tokens and a
+    // truncated rewrite loses its closing invariants.
     const raw = await reviewChat({
       system,
       content: lines.join("\n\n"),
-      maxTokens: 8192,
+      maxTokens: 16384,
       temperature: 0.6,
     });
     const prompt = raw.trim();
