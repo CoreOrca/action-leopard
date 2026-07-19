@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useWorkspace } from "@/lib/store";
 import { useShotScope } from "@/lib/shot-scope";
 import { saveBlobAsAsset } from "@/lib/canvas";
@@ -31,6 +31,8 @@ export default function PreviewPanel({
     filterAssets,
   } = useShotScope();
   const uploadInput = useRef<HTMLInputElement>(null);
+  /** Full-size player for the previewed video. */
+  const [enlarged, setEnlarged] = useState<string | null>(null);
 
   async function uploadImage(file: File) {
     setBusy("Uploading image…");
@@ -66,12 +68,14 @@ export default function PreviewPanel({
 
   // Scoped: only honor a selection that belongs to this shot's own set —
   // agent generations for OTHER shots must never replace what the user is
-  // looking at. Default: the marked start frame, else the shot's latest frame.
+  // looking at. Default: the shot's clip when it exists (the latest thing
+  // made for the shot), else the marked start frame, else its latest frame.
   const selectedRaw = assets.find((a) => a.id === selectedAssetId);
   const selected = scoped
     ? (selectedRaw && images.some((i) => i.id === selectedRaw.id)
         ? selectedRaw
         : undefined) ??
+      images.find((a) => a.id === shot?.video_asset_id) ??
       images.find((a) => a.id === startFrameId) ??
       [...images]
         .reverse()
@@ -126,6 +130,15 @@ export default function PreviewPanel({
                   Annotate
                 </button>
               </>
+            )}
+            {selected.type === "video" && (
+              <button
+                onClick={() => setEnlarged(selected.url)}
+                className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:border-border"
+                title="Watch full size"
+              >
+                ⛶ Enlarge
+              </button>
             )}
             <button
               onClick={() => downloadAsset(selected.url)}
@@ -200,14 +213,43 @@ export default function PreviewPanel({
                   : ""
               }${a.prompt ? ` — ${a.prompt.slice(0, 80)}` : ""}`}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={a.url}
-                alt=""
-                className="h-full w-full cursor-pointer object-cover"
-                loading="lazy"
-                onClick={() => select(a.id)}
-              />
+              {a.type === "video" ? (
+                <div
+                  className="relative h-full w-full cursor-pointer"
+                  onClick={() => select(a.id)}
+                >
+                  {a.thumbnail_url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={a.thumbnail_url}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    /* eslint-disable-next-line jsx-a11y/media-has-caption */
+                    <video
+                      src={`${a.url}#t=0.1`}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      className="pointer-events-none h-full w-full object-cover"
+                    />
+                  )}
+                  <span className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background/80 px-1 font-mono text-[10px]">
+                    ▶
+                  </span>
+                </div>
+              ) : (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={a.url}
+                  alt=""
+                  className="h-full w-full cursor-pointer object-cover"
+                  loading="lazy"
+                  onClick={() => select(a.id)}
+                />
+              )}
               {(startFrameId === a.id || endFrameId === a.id) && (
                 <span className="absolute left-0 top-0 flex">
                   {startFrameId === a.id && (
@@ -236,6 +278,34 @@ export default function PreviewPanel({
           ))
         )}
       </div>
+
+      {enlarged && (
+        <div
+          className="fixed inset-0 z-200 flex items-center justify-center bg-black/85"
+          onClick={() => setEnlarged(null)}
+        >
+          <div
+            className="w-full max-w-5xl border border-border bg-background p-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <video
+              src={enlarged}
+              controls
+              autoPlay
+              className="max-h-[80vh] w-full"
+            />
+            <div className="mt-2 flex justify-end">
+              <button
+                onClick={() => setEnlarged(null)}
+                className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase hover:border-border"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

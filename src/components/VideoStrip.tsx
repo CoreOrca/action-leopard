@@ -3,11 +3,14 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useWorkspace } from "@/lib/store";
+import { useSceneAgent } from "@/lib/scene-store";
 import type { Asset } from "@/lib/types";
 
 export default function VideoStrip() {
-  const { assets, setAssets, select } = useWorkspace();
+  const { project, assets, setAssets, select } = useWorkspace();
   const [playing, setPlaying] = useState<Asset | null>(null);
+  /** Sequence player: index into `videos`, advancing as each clip ends. */
+  const [seqIndex, setSeqIndex] = useState<number | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
 
   const videos = assets
@@ -42,11 +45,36 @@ export default function VideoStrip() {
     await createClient().from("assets").delete().eq("id", id);
   }
 
+  /** Scene projects: double-click scopes shot detail to the clip's shot. */
+  function onItemDoubleClick(v: Asset) {
+    if (project?.project_type === "scene") {
+      const scene = useSceneAgent.getState();
+      const shot = scene.shots.find((s) => s.video_asset_id === v.id);
+      if (shot) {
+        scene.setActiveShot(shot.id);
+        select(v.id);
+        return;
+      }
+    }
+    setPlaying(v);
+  }
+
   return (
     <section className="border border-border-soft">
-      <div className="border-b border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-muted">
-        Sequence — {videos.length} clip{videos.length === 1 ? "" : "s"} (drag to
-        reorder)
+      <div className="flex items-center justify-between border-b border-border-soft px-2 py-1">
+        <span className="font-mono text-[10px] uppercase tracking-widest text-muted">
+          Sequence — {videos.length} clip{videos.length === 1 ? "" : "s"} (drag
+          to reorder)
+        </span>
+        {videos.length > 0 && (
+          <button
+            onClick={() => setSeqIndex(0)}
+            className="border border-border-soft px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider hover:border-border"
+            title="Play the whole sequence full size, clip after clip"
+          >
+            ▶ Play all
+          </button>
+        )}
       </div>
       <div className="flex h-24 items-center gap-2 overflow-x-auto p-2">
         {videos.length === 0 ? (
@@ -63,8 +91,12 @@ export default function VideoStrip() {
               onDrop={() => reorder(v.id)}
               className="group relative h-20 w-32 shrink-0 cursor-grab border border-border-soft hover:border-border"
               onClick={() => select(v.id)}
-              onDoubleClick={() => setPlaying(v)}
-              title="Click: view in preview · double-click: open player"
+              onDoubleClick={() => onItemDoubleClick(v)}
+              title={
+                project?.project_type === "scene"
+                  ? "Click: view in preview · double-click: open its shot"
+                  : "Click: view in preview · double-click: open player"
+              }
             >
               {v.thumbnail_url ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
@@ -99,6 +131,63 @@ export default function VideoStrip() {
           ))
         )}
       </div>
+
+      {seqIndex !== null && videos[seqIndex] && (
+        <div
+          className="fixed inset-0 z-200 flex items-center justify-center bg-black/85"
+          onClick={() => setSeqIndex(null)}
+        >
+          <div
+            className="w-full max-w-5xl border border-border bg-background p-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <video
+              key={videos[seqIndex].id}
+              src={videos[seqIndex].url}
+              controls
+              autoPlay
+              onEnded={() =>
+                setSeqIndex((i) =>
+                  i !== null && i + 1 < videos.length ? i + 1 : null
+                )
+              }
+              className="max-h-[80vh] w-full"
+            />
+            <div className="mt-2 flex items-center justify-between">
+              <span className="font-mono text-[10px] text-muted">
+                clip {seqIndex + 1} / {videos.length}
+              </span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setSeqIndex((i) => Math.max(0, (i ?? 0) - 1))}
+                  disabled={seqIndex === 0}
+                  className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase hover:border-border disabled:opacity-40"
+                >
+                  ← Prev
+                </button>
+                <button
+                  onClick={() =>
+                    setSeqIndex((i) =>
+                      i !== null && i + 1 < videos.length ? i + 1 : i
+                    )
+                  }
+                  disabled={seqIndex + 1 >= videos.length}
+                  className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase hover:border-border disabled:opacity-40"
+                >
+                  Next →
+                </button>
+                <button
+                  onClick={() => setSeqIndex(null)}
+                  className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase hover:border-border"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {playing && (
         <div

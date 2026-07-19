@@ -640,7 +640,7 @@ export async function replanScene(): Promise<void> {
   if (
     shots.length &&
     !confirm(
-      "Start over? This deletes all shots and re-plans from your intent, script, and location map. Generated images stay in the asset palette."
+      `Start over? This PERMANENTLY deletes all ${shots.length} shots — plans, prompts, judge history, and approvals — and re-plans from your intent, script, and location map. Generated images stay in the asset palette but lose their place in the sequence. This cannot be undone.`
     )
   )
     return;
@@ -814,12 +814,10 @@ export async function makeVideos(
   }
 
   const model = getVideoModel(project.video_model);
-  if (
-    !confirm(
-      `Generate ${eligible.length} video clip${eligible.length > 1 ? "s" : ""} with ${model.label}? This spends fal credits.`
-    )
-  )
-    return;
+  scene.pushEvent({
+    kind: "info",
+    text: `Rendering ${eligible.length} clip${eligible.length > 1 ? "s" : ""} with ${model.label}…`,
+  });
 
   scene.setPhase("running");
   cancelRequested = false;

@@ -14,7 +14,16 @@ export type ScenePhase =
 export interface SceneAgentEvent {
   ts: number;
   shotId?: string;
-  kind: "info" | "plan" | "gen" | "verdict" | "fix" | "escalate" | "error";
+  kind:
+    | "info"
+    | "plan"
+    | "gen"
+    | "verdict"
+    | "fix"
+    | "escalate"
+    | "error"
+    | "user"
+    | "chat";
   text: string;
   imageUrl?: string;
 }

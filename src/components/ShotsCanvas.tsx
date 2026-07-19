@@ -52,6 +52,10 @@ export default function ShotsCanvas({
     setToolbarSlot(document.getElementById("scene-toolbar-slot"));
   }, []);
   const [cam, setCam] = useState({ x: 48, y: 64, z: 1 });
+  /** Full-size player for a shot's clip. */
+  const [playing, setPlaying] = useState<{ url: string; title: string } | null>(
+    null
+  );
   const drag = useRef<{ startX: number; startY: number; camX: number; camY: number } | null>(null);
 
   /** Wheel: pan; ctrl/cmd+wheel (incl. pinch) zooms toward the cursor. */
@@ -272,6 +276,7 @@ export default function ShotsCanvas({
             const col = i % COLS;
             const row = Math.floor(i / COLS);
             const url = assetUrl(shot.start_asset_id);
+            const videoUrl = assetUrl(shot.video_asset_id);
             const selected = shot.id === activeShotId;
             const statusLabel = STATUS_LABEL[shot.status];
             return (
@@ -333,10 +338,22 @@ export default function ShotsCanvas({
                     {shot.revision_count > 0 ? ` v${shot.revision_count + 1}` : ""}
                   </span>
                 )}
-                {shot.video_asset_id && (
-                  <span className="absolute bottom-1.5 right-1.5 border border-border-soft bg-background px-1 font-mono text-[9px]">
+                {/* Clip exists: an obvious centered play control → full-size player */}
+                {videoUrl && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPlaying({
+                        url: videoUrl,
+                        title: shot.title || `Shot ${i + 1}`,
+                      });
+                    }}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    className="absolute left-1/2 top-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center border border-border bg-background/85 font-mono text-base shadow-sm hover:bg-foreground hover:text-background"
+                    title="Play this shot's clip full size"
+                  >
                     ▶
-                  </span>
+                  </button>
                 )}
                 <div className="absolute right-1.5 top-1.5 hidden gap-1 group-hover:flex">
                   {shot.status === "escalated" && url && (
@@ -435,6 +452,37 @@ export default function ShotsCanvas({
           e.target.value = "";
         }}
       />
+
+      {playing && (
+        <div
+          className="fixed inset-0 z-200 flex items-center justify-center bg-black/85"
+          onClick={() => setPlaying(null)}
+        >
+          <div
+            className="w-full max-w-5xl border border-border bg-background p-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <video
+              src={playing.url}
+              controls
+              autoPlay
+              className="max-h-[80vh] w-full"
+            />
+            <div className="mt-2 flex items-center justify-between">
+              <span className="truncate font-mono text-[10px] text-muted">
+                {playing.title}
+              </span>
+              <button
+                onClick={() => setPlaying(null)}
+                className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase hover:border-border"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

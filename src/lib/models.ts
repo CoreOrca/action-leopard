@@ -22,13 +22,13 @@ export const IMAGE_MODELS: ImageModelDef[] = [
     id: "nano-banana-pro",
     label: "Nano Banana Pro",
     falId: "fal-ai/gemini-3-pro-image-preview/edit",
-    maxImages: 6,
+    maxImages: 14,
   },
   {
     id: "nano-banana-2",
     label: "Nano Banana 2",
     falId: "fal-ai/nano-banana-2/edit",
-    maxImages: 6,
+    maxImages: 14,
   },
 ];
 

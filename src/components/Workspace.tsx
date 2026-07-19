@@ -186,13 +186,13 @@ function SceneTabs() {
   const active = shots.find((s) => s.id === activeShotId);
   const activeIndex = active ? shots.indexOf(active) + 1 : null;
   return (
-    <div className="grid grid-cols-[1fr_auto_1fr] items-center">
-      <div className="flex items-center gap-0">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center">
+      <div className="flex min-w-0 items-center gap-0 overflow-hidden">
         {(["shots", "fixit"] as const).map((v) => (
           <button
             key={v}
             onClick={() => setView(v)}
-            className={`border px-3 py-1 font-mono text-[10px] uppercase tracking-wider ${
+            className={`shrink-0 whitespace-nowrap border px-3 py-1 font-mono text-[10px] uppercase tracking-wider ${
               view === v
                 ? "border-foreground bg-foreground text-background"
                 : "border-border-soft text-muted hover:border-border"
@@ -204,7 +204,7 @@ function SceneTabs() {
         {view === "fixit" && active && (
           <button
             onClick={() => setView("shots")}
-            className="ml-3 font-mono text-[10px] uppercase tracking-wider text-muted hover:text-foreground"
+            className="ml-3 min-w-0 truncate font-mono text-[10px] uppercase tracking-wider text-muted hover:text-foreground"
             title="Back to the shots canvas"
           >
             ◀ Shot {activeIndex}

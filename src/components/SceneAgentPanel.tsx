@@ -27,6 +27,8 @@ const EVENT_GLYPH: Record<SceneAgentEvent["kind"], string> = {
   fix: "✎",
   escalate: "!",
   error: "×",
+  user: "»",
+  chat: "✦",
 };
 
 type WindowMode = "docked" | "floating" | "minimized";
@@ -91,6 +93,8 @@ export default function SceneAgentPanel({
   onPatchProject?: (patch: Record<string, unknown>) => void;
 }) {
   const [dryRun, setDryRun] = useState(false);
+  const [chatText, setChatText] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
   const { project, patchProject, assets } = useWorkspace();
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadShotId = useRef<string | null>(null);
@@ -206,6 +210,64 @@ export default function SceneAgentPanel({
   const locationThumb = (shot: Shot) =>
     project?.location_map?.find((l) => l.asset_id === shot.location_asset_id)
       ?.url ?? null;
+
+  /** Free-form chat with the agent, grounded in the live scene state. */
+  async function sendChat() {
+    const msg = chatText.trim();
+    if (!msg || chatBusy) return;
+    setChatText("");
+    const scene = useSceneAgent.getState();
+    // History BEFORE pushing this message, so it isn't duplicated.
+    const history = scene.events
+      .filter((e) => e.kind === "user" || e.kind === "chat")
+      .slice(-12)
+      .map((e) => ({
+        role: e.kind === "user" ? ("user" as const) : ("assistant" as const),
+        content: e.text,
+      }));
+    scene.pushEvent({ kind: "user", text: msg });
+    setChatBusy(true);
+    try {
+      const res = await fetch("/api/scene/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: msg,
+          history,
+          context: {
+            phase,
+            intent: project?.intent,
+            script: project?.script?.slice(0, 4000),
+            artDirection: project?.art_direction,
+            invariants: project?.scene_meta?.invariants,
+            imageModel: project?.image_model,
+            videoModel: project?.video_model,
+            shots: shots.map((s, i) => ({
+              n: i + 1,
+              title: s.title,
+              kind: s.kind,
+              status: s.status,
+              version: s.revision_count + 1,
+              hasStart: !!s.start_asset_id,
+              hasEnd: !!s.end_asset_id,
+              hasVideo: !!s.video_asset_id,
+              beat: (s.spec as Partial<ShotSpec>)?.description,
+              judge: s.judge?.last?.summary,
+            })),
+          },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "chat failed");
+      useSceneAgent.getState().pushEvent({ kind: "chat", text: data.reply });
+    } catch (e) {
+      useSceneAgent
+        .getState()
+        .pushEvent({ kind: "error", text: (e as Error).message });
+    } finally {
+      setChatBusy(false);
+    }
+  }
 
   function openInFixit(shotId: string) {
     // Land on this shot's own frame, not a stale/other-shot selection.
@@ -529,14 +591,6 @@ export default function SceneAgentPanel({
                 )}
                 <div className="mt-2 flex flex-wrap gap-1">
                   <button
-                    onClick={() => onRetryShot?.(shot.id)}
-                    disabled={!onRetryShot || busy}
-                    className="border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider hover:bg-foreground hover:text-background disabled:opacity-40"
-                    title="Reset the fix budget and try again"
-                  >
-                    Retry
-                  </button>
-                  <button
                     onClick={() => {
                       uploadShotId.current = shot.id;
                       uploadRef.current?.click();
@@ -564,6 +618,14 @@ export default function SceneAgentPanel({
                   >
                     Shot detail
                   </button>
+                  <button
+                    onClick={() => onRetryShot?.(shot.id)}
+                    disabled={!onRetryShot || busy}
+                    className="border border-border-soft px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted hover:border-border hover:text-foreground disabled:opacity-40"
+                    title="Generate NEW versions (existing frames stay in the strip above)"
+                  >
+                    Retry
+                  </button>
                 </div>
               </div>
             </div>
@@ -584,9 +646,9 @@ export default function SceneAgentPanel({
             </span>
             <div className="min-w-0 flex-1">
               <p
-                className={`font-mono text-[10px] leading-relaxed ${
+                className={`whitespace-pre-wrap font-mono text-[10px] leading-relaxed ${
                   e.kind === "error" ? "text-danger" : ""
-                }`}
+                } ${e.kind === "user" ? "text-muted" : ""}`}
               >
                 {e.text}
               </p>
@@ -616,8 +678,27 @@ export default function SceneAgentPanel({
         }}
       />
 
-      {/* Footer: run controls */}
+      {/* Footer: chat + run controls */}
       <div className="shrink-0 border-t border-border-soft p-2">
+        <div className="mb-1 flex gap-1">
+          <input
+            value={chatText}
+            onChange={(e) => setChatText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") sendChat();
+            }}
+            placeholder="Message the agent — shots, verdicts, what to do next…"
+            disabled={chatBusy}
+            className="min-w-0 flex-1 border border-border-soft bg-transparent px-2 py-1.5 font-mono text-[11px] outline-none focus:border-border disabled:opacity-40"
+          />
+          <button
+            onClick={sendChat}
+            disabled={chatBusy || !chatText.trim()}
+            className="shrink-0 border border-border-soft px-2 font-mono text-[10px] uppercase tracking-wider hover:border-border disabled:opacity-40"
+          >
+            {chatBusy ? "…" : "Send"}
+          </button>
+        </div>
         {busy && (
           <button
             onClick={onCancel}
@@ -688,14 +769,16 @@ export default function SceneAgentPanel({
           </button>
         )}
         {!busy && shots.length > 0 && (
-          <button
-            onClick={onReplan}
-            disabled={!onReplan}
-            className="mt-1 w-full border border-border-soft px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-muted hover:border-border hover:text-foreground disabled:opacity-40"
-            title="Delete all shots and re-plan from the same intent, script, locations, and elements"
-          >
-            ↻ Re-plan scene from inputs
-          </button>
+          <div className="mt-1 text-right">
+            <button
+              onClick={onReplan}
+              disabled={!onReplan}
+              className="font-mono text-[9px] uppercase tracking-wider text-muted underline-offset-2 hover:underline disabled:opacity-40"
+              title="DANGER: deletes every shot and re-plans from scratch — your generated work stays only in the asset palette"
+            >
+              start over…
+            </button>
+          </div>
         )}
       </div>
     </aside>
