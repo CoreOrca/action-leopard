@@ -1,6 +1,6 @@
 # Action Leopard
 
-Spatial control for generated action. Translate real locations into malleable scenes on a canvas, direct with precision, and generate video that obeys — built for professional filmmakers and serious AI-video creators working inside the constraints of scenes and locations that already exist.
+Spatial control for generated action. Translate real locations into malleable scenes on a canvas, direct with precision, and generate video that precisely follows user intent. Action Leopard is built for professional filmmakers and serious AI-video creators working inside the constraints of scenes and locations that already exist.
 
 ## The core idea
 
