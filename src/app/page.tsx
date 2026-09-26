@@ -1,6 +1,12 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { AccessGate } from "@/components/AccessGate";
+import { ACCESS_COOKIE, gateEnabled, hasAccessCookie } from "@/lib/access-gate";
 
-export default function Home() {
+export default async function Home() {
+  const cookieStore = await cookies();
+  const unlocked =
+    !gateEnabled() || hasAccessCookie(cookieStore.get(ACCESS_COOKIE)?.value);
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-background text-foreground px-6">
       <div className="relative w-full max-w-64 mb-8 md:mb-10" aria-hidden>
@@ -30,12 +36,16 @@ export default function Home() {
         Spatial control for generated action. Translate real locations into
         malleable scenes, direct with precision, generate video that obeys.
       </p>
-      <Link
-        href="/login"
-        className="mt-10 border border-foreground px-8 py-3 font-mono text-sm uppercase tracking-widest hover:bg-foreground hover:text-background transition-colors"
-      >
-        Enter
-      </Link>
+      {unlocked ? (
+        <Link
+          href="/login"
+          className="mt-10 border border-foreground px-8 py-3 font-mono text-sm uppercase tracking-widest hover:bg-foreground hover:text-background transition-colors"
+        >
+          Enter
+        </Link>
+      ) : (
+        <AccessGate />
+      )}
     </main>
   );
 }

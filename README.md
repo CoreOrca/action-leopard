@@ -94,6 +94,7 @@ Optional:
 | Variable | Purpose |
 |---|---|
 | `ANTHROPIC_API_KEY` | Enables the independent Claude judge/fixer for scene runs (grok fallback without it) |
+| `USER_ACCESS_CODES` | Comma-separated invite codes. When set, login, the studio, and the APIs stay closed until a visitor enters one. The landing page asks for a code and links an email address for requests. Leave unset for open local use. |
 
 The legacy `SUPABASE_ANON_KEY` / `SERVICE_ROLE_KEY` / `JWT_SECRET` fields are **not needed** — this app uses the new publishable/secret API keys.
 
